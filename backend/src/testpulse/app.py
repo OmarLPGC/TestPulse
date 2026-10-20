@@ -1,5 +1,5 @@
-from collections.abc import AsyncIterator
 from typing import AsyncGenerator, Optional
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from sqlalchemy import create_engine
@@ -11,8 +11,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app_settings = settings or load_settings()
     engine = create_engine(app_settings.database_url, pool_pre_ping=True)
 
-    @AsyncGenerator
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
         try:
             yield
         finally:
