@@ -25,6 +25,7 @@ ni compartas este archivo. Instala las versiones fijadas de las dependencias y e
 python -m pip install -r requirements.lock
 python -m pip install --no-deps --no-build-isolation -e .
 docker compose up -d db
+python -m alembic upgrade head
 ```
 
 Arranca la API con:
@@ -38,16 +39,21 @@ La API estará disponible en <http://127.0.0.1:8000>; la comprobación de salud 
 Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persisten en el volumen
 `postgres_data`; `docker compose down -v` también elimina ese volumen.
 
-## Tests y calidad
+## Migraciones, tests y calidad
 
-La suite usa SQLite en memoria y no necesita que PostgreSQL esté iniciado. Con el entorno virtual
-activo, ejecuta:
+Las migraciones se ejecutan contra la URL definida por las variables `POSTGRES_*` o el archivo
+`.env`. La suite de integración usa PostgreSQL y crea un esquema aislado nuevo para probar las
+migraciones desde cero y comprobar las restricciones de integridad. Con PostgreSQL iniciado y el
+entorno virtual activo, configura la URL de pruebas (usa la misma contraseña local de `.env`):
 
 ```powershell
+$env:TEST_DATABASE_URL = "postgresql+psycopg://testpulse:replace-with-a-local-password@127.0.0.1:5432/testpulse"
 python -m pytest
 python -m ruff check .
 python -m ruff format --check .
 ```
 
-El último comando comprueba el formato sin modificar archivos. GitHub Actions ejecuta estas tres
-comprobaciones en cada pull request y en cada push a `main`.
+Si `TEST_DATABASE_URL` no está definido, pytest omite las pruebas de integración PostgreSQL. GitHub
+Actions inicia un PostgreSQL limpio y ejecuta las migraciones, los tests y los controles de calidad
+en cada pull request y en cada push a `main`. El último comando comprueba el formato sin modificar
+archivos.

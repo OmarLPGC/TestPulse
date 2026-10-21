@@ -1,5 +1,6 @@
-from typing import AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 from sqlalchemy import create_engine
