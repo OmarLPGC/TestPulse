@@ -9,7 +9,7 @@ from database.base import Base
 
 if TYPE_CHECKING:
     from database.project_entity import Project
-    from database.test_result import TestResult
+    from database.test_result_entity import TestResult
 
 
 class TestCase(Base):
