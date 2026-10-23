@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from database.base import Base
 from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from database.base import Base
 
 if TYPE_CHECKING:
     from database.schemas.project_entity import Project

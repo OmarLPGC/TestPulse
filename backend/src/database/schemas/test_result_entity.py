@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
+from database.base import Base
+from database.enums import TestOutcome
 from sqlalchemy import (
     CheckConstraint,
     ForeignKeyConstraint,
@@ -13,9 +15,6 @@ from sqlalchemy import (
     Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from database.base import Base
-from database.enums import TestOutcome
 
 if TYPE_CHECKING:
     from database.schemas.test_case_entity import TestCase

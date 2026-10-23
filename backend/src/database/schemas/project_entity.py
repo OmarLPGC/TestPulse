@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 from database.base import Base
+from sqlalchemy import DateTime, Integer, String, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
     from database.schemas.test_case_entity import TestCase
@@ -15,6 +14,7 @@ if TYPE_CHECKING:
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = (UniqueConstraint("name", name="uq_projects_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)

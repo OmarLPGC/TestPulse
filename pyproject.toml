@@ -12,6 +12,7 @@ dependencies = [
     "alembic>=1.14,<2",
     "fastapi>=0.115,<0.120",
     "psycopg[binary]>=3.2,<3.3",
+    "pydantic>=2.8,<3",
     "python-dotenv>=1.0,<2",
     "SQLAlchemy>=2.0,<3",
     "uvicorn>=0.34,<0.35",
@@ -41,6 +42,7 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.ruff.lint.per-file-ignores]
 "backend/src/database/*.py" = ["UP007"]
+"backend/src/api/*.py" = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"
