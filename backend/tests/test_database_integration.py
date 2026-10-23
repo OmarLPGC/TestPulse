@@ -20,10 +20,13 @@ from database import (
 from database import (
     TestRun as RunEntity,
 )
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from testpulse.app import create_app
+from testpulse.config import Settings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 pytestmark = pytest.mark.integration
@@ -125,6 +128,38 @@ def test_project_is_persisted(postgres_engine, session: Session) -> None:
     assert persisted.description == "Integration test"
     assert persisted.created_at is not None
     assert persisted.updated_at is not None
+
+
+def test_duplicate_project_name_is_rejected_by_postgres(session: Session) -> None:
+    name = f"Duplicate-{uuid4().hex}"
+    session.add_all([Project(name=name), Project(name=name)])
+
+    with pytest.raises(IntegrityError) as error:
+        session.flush()
+
+    assert error.value.orig.sqlstate == "23505"
+    assert error.value.orig.diag.constraint_name == "uq_projects_name"
+
+
+def test_project_api_persists_across_app_connection_restart(postgres_engine) -> None:
+    settings = Settings(app_env="test", database_url=postgres_engine.url)
+    app = create_app(settings, database_engine=postgres_engine)
+    with TestClient(app) as client:
+        created = client.post("/projects", json={"name": f"Persistent-{uuid4().hex}"})
+        duplicate = client.post("/projects", json={"name": created.json()["name"]})
+
+    assert created.status_code == 201
+    assert duplicate.status_code == 409
+    project_id = created.json()["id"]
+    postgres_engine.dispose()
+
+    restarted_app = create_app(settings, database_engine=postgres_engine)
+    with TestClient(restarted_app) as client:
+        recovered = client.get(f"/projects/{project_id}")
+
+    assert recovered.status_code == 200
+    assert recovered.json()["id"] == project_id
+    assert recovered.json()["name"] == created.json()["name"]
 
 
 def test_duplicate_test_identity_in_project_is_rejected(session: Session) -> None:

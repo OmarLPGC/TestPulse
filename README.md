@@ -39,6 +39,13 @@ La API estará disponible en <http://127.0.0.1:8000>; la comprobación de salud 
 Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persisten en el volumen
 `postgres_data`; `docker compose down -v` también elimina ese volumen.
 
+## API de proyectos
+
+- `POST /projects`: crea un proyecto con `name` y `repository_url` opcional. Devuelve `201`; los
+  nombres vacíos o URL inválidas devuelven `422` y los nombres duplicados `409`.
+- `GET /projects`: lista los proyectos registrados.
+- `GET /projects/{project_id}`: devuelve el proyecto o `404` si no existe.
+
 ## Migraciones, tests y calidad
 
 Las migraciones se ejecutan contra la URL definida por las variables `POSTGRES_*` o el archivo

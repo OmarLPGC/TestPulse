@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
+from database.base import Base
+from database.enums import TestRunStatus
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -16,9 +18,6 @@ from sqlalchemy import (
     Enum as SAEnum,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from database.base import Base
-from database.enums import TestRunStatus
 
 if TYPE_CHECKING:
     from database.schemas.project_entity import Project
