@@ -243,7 +243,7 @@ def test_database_rejects_unrecognized_run_status(session: Session) -> None:
     with pytest.raises(IntegrityError) as error:
         session.execute(
             text("INSERT INTO test_runs (project_id, status) VALUES (:project_id, :status)"),
-            {"project_id": project.id, "status": "not-a-status"},
+            {"project_id": project.id, "status": "invalid"},
         )
 
     assert error.value.orig.sqlstate == "23514"
@@ -266,7 +266,7 @@ def test_database_rejects_unrecognized_result_outcome(session: Session) -> None:
                 "project_id": project.id,
                 "test_run_id": test_run.id,
                 "test_case_id": test_case.id,
-                "outcome": "not-an-outcome",
+                "outcome": "invalid",
             },
         )
 
