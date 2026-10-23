@@ -9,8 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database.base import Base
 
 if TYPE_CHECKING:
-    from database.test_case_entity import TestCase
-    from database.test_run_entity import TestRun
+    from database.schemas.test_case_entity import TestCase
+    from database.schemas.test_run_entity import TestRun
 
 
 class Project(Base):

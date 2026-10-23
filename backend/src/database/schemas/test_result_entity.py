@@ -18,8 +18,8 @@ from database.base import Base
 from database.enums import TestOutcome
 
 if TYPE_CHECKING:
-    from database.test_case_entity import TestCase
-    from database.test_run_entity import TestRun
+    from database.schemas.test_case_entity import TestCase
+    from database.schemas.test_run_entity import TestRun
 
 
 class TestResult(Base):

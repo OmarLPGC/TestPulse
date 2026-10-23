@@ -8,8 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database.base import Base
 
 if TYPE_CHECKING:
-    from database.project_entity import Project
-    from database.test_result_entity import TestResult
+    from database.schemas.project_entity import Project
+    from database.schemas.test_result_entity import TestResult
 
 
 class TestCase(Base):

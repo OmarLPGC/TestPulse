@@ -21,8 +21,8 @@ from database.base import Base
 from database.enums import TestRunStatus
 
 if TYPE_CHECKING:
-    from database.project_entity import Project
-    from database.test_result_entity import TestResult
+    from database.schemas.project_entity import Project
+    from database.schemas.test_result_entity import TestResult
 
 
 class TestRun(Base):
