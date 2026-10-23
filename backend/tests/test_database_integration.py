@@ -247,7 +247,7 @@ def test_database_rejects_unrecognized_run_status(session: Session) -> None:
         )
 
     assert error.value.orig.sqlstate == "23514"
-    assert error.value.orig.diag.constraint_name == "ck_test_runs_test_run_status"
+    assert error.value.orig.diag.constraint_name == "ck_test_runs_ck_test_runs_test_run_status"
 
 
 def test_database_rejects_unrecognized_result_outcome(session: Session) -> None:
@@ -271,4 +271,4 @@ def test_database_rejects_unrecognized_result_outcome(session: Session) -> None:
         )
 
     assert error.value.orig.sqlstate == "23514"
-    assert error.value.orig.diag.constraint_name == "ck_test_results_test_outcome"
+    assert error.value.orig.diag.constraint_name == "ck_test_results_ck_test_results_test_outcome"
