@@ -28,6 +28,9 @@ class TestRun(Base):
     __tablename__ = "test_runs"
     __table_args__ = (
         UniqueConstraint("id", "project_id", name="uq_test_runs_id_project_id"),
+        UniqueConstraint(
+            "project_id", "idempotency_key", name="uq_test_runs_project_idempotency_key"
+        ),
         CheckConstraint("duration IS NULL OR duration >= 0", name="duration_nonnegative"),
     )
 
@@ -38,6 +41,8 @@ class TestRun(Base):
     commit_sha: Mapped[Optional[str]] = mapped_column(String(40))
     branch: Mapped[Optional[str]] = mapped_column(String(255))
     report_sha: Mapped[Optional[str]] = mapped_column(String(64))
+    idempotency_key: Mapped[Optional[str]] = mapped_column(String(255))
+    request_fingerprint: Mapped[Optional[str]] = mapped_column(String(64))
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     ingested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

@@ -6,6 +6,7 @@ class TestRunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    EMPTY = "empty"
 
 
 class TestOutcome(str, Enum):
