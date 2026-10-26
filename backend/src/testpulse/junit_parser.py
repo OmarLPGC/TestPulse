@@ -31,17 +31,31 @@ class ParsedTestCase:
     error_message: Optional[str] = None
     traceback: Optional[str] = None
 
+    @property
+    def identity(self) -> tuple[Optional[str], str]:
+        return self.class_name, self.name
+
 
 @dataclass(frozen=True)
 class ParsedJUnitReport:
     test_cases: tuple[ParsedTestCase, ...]
 
 
-def parse_junit_xml(xml_content: Union[str, bytes]) -> ParsedJUnitReport:
+def parse_junit_xml(
+    xml_content: Union[str, bytes],
+    *,
+    max_xml_bytes: int = MAX_XML_BYTES,
+    max_test_cases: int = MAX_TEST_CASES,
+) -> ParsedJUnitReport:
     """Parse and validate a JUnit XML report without persisting its contents."""
+    if not 0 < max_xml_bytes <= MAX_XML_BYTES:
+        raise ValueError(f"max_xml_bytes must be between 1 and {MAX_XML_BYTES}.")
+    if not 0 < max_test_cases <= MAX_TEST_CASES:
+        raise ValueError(f"max_test_cases must be between 1 and {MAX_TEST_CASES}.")
+
     if isinstance(xml_content, str):
-        if len(xml_content) > MAX_XML_BYTES:
-            raise JUnitReportError(f"JUnit XML exceeds the {MAX_XML_BYTES}-byte limit.")
+        if len(xml_content) > max_xml_bytes:
+            raise JUnitReportError(f"JUnit XML exceeds the {max_xml_bytes}-byte limit.")
         try:
             xml_bytes = xml_content.encode("utf-8")
         except UnicodeEncodeError:
@@ -51,8 +65,8 @@ def parse_junit_xml(xml_content: Union[str, bytes]) -> ParsedJUnitReport:
     else:
         raise JUnitReportError("JUnit XML content must be text or bytes.")
 
-    if len(xml_bytes) > MAX_XML_BYTES:
-        raise JUnitReportError(f"JUnit XML exceeds the {MAX_XML_BYTES}-byte limit.")
+    if len(xml_bytes) > max_xml_bytes:
+        raise JUnitReportError(f"JUnit XML exceeds the {max_xml_bytes}-byte limit.")
 
     try:
         root = ElementTree.fromstring(
@@ -75,8 +89,8 @@ def parse_junit_xml(xml_content: Union[str, bytes]) -> ParsedJUnitReport:
     for testcase in root.iter():
         if _local_name(testcase.tag) != "testcase":
             continue
-        if len(parsed_cases) >= MAX_TEST_CASES:
-            raise JUnitReportError(f"JUnit XML exceeds the {MAX_TEST_CASES}-test limit.")
+        if len(parsed_cases) >= max_test_cases:
+            raise JUnitReportError(f"JUnit XML exceeds the {max_test_cases}-test limit.")
 
         name = testcase.get("name")
         if name is None or not name.strip():

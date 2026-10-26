@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from api.project_routes import router as projects_router
+from api.run_routes import router as runs_router
 from fastapi import FastAPI
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
@@ -33,6 +34,7 @@ def create_app(
     application.state.settings = app_settings
     application.state.database_engine = engine
     application.include_router(projects_router)
+    application.include_router(runs_router)
 
     @application.get("/health", tags=["health"])
     def health() -> dict[str, str]:

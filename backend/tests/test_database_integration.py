@@ -8,6 +8,7 @@ from alembic.config import Config
 from database import (
     Project,
 )
+from database import TestCase as AtomicTestCaseEntity
 from database import (
     TestCase as CaseEntity,
 )
@@ -21,7 +22,7 @@ from database import (
     TestRun as RunEntity,
 )
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -247,7 +248,7 @@ def test_database_rejects_unrecognized_run_status(session: Session) -> None:
         )
 
     assert error.value.orig.sqlstate == "23514"
-    assert error.value.orig.diag.constraint_name == "ck_test_runs_ck_test_runs_test_run_status"
+    assert error.value.orig.diag.constraint_name == "ck_test_runs_test_run_status"
 
 
 def test_database_rejects_unrecognized_result_outcome(session: Session) -> None:
@@ -272,3 +273,61 @@ def test_database_rejects_unrecognized_result_outcome(session: Session) -> None:
 
     assert error.value.orig.sqlstate == "23514"
     assert error.value.orig.diag.constraint_name == "ck_test_results_ck_test_results_test_outcome"
+
+
+def test_failed_result_persistence_rolls_back_entire_run(postgres_engine) -> None:
+    with Session(postgres_engine) as session:
+        project = create_project(session, "AtomicIngestion")
+        session.commit()
+        project_id = project.id
+
+    def fail_when_results_are_flushed(
+        session: Session, flush_context: object, instances: object
+    ) -> None:
+        if any(isinstance(item, ResultEntity) for item in session.new):
+            raise RuntimeError("Simulated result persistence failure.")
+
+    event.listen(Session, "before_flush", fail_when_results_are_flushed)
+    try:
+        settings = Settings(app_env="test", database_url=postgres_engine.url)
+        app = create_app(settings, database_engine=postgres_engine)
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post(
+                f"/api/v1/projects/{project_id}/runs",
+                content=(
+                    "<testsuite>"
+                    '<testcase classname="atomic.Case" name="one"/>'
+                    '<testcase classname="atomic.Case" name="two"/>'
+                    "</testsuite>"
+                ),
+                headers={"Content-Type": "application/xml"},
+            )
+    finally:
+        event.remove(Session, "before_flush", fail_when_results_are_flushed)
+
+    assert response.status_code == 500
+    with Session(postgres_engine) as session:
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(RunEntity)
+                .where(RunEntity.project_id == project_id)
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(AtomicTestCaseEntity)
+                .where(AtomicTestCaseEntity.project_id == project_id)
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ResultEntity)
+                .where(ResultEntity.project_id == project_id)
+            )
+            == 0
+        )
