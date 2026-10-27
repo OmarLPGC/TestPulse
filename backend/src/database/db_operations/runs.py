@@ -1,9 +1,10 @@
 import hashlib
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -194,3 +195,103 @@ def _request_fingerprint(
         digest.update(len(value).to_bytes(8, "big"))
         digest.update(value)
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class TestRunSummary:
+    run: TestRun
+    total: int
+    passed: int
+    failed: int
+    skipped: int
+    error: int
+
+
+def list_project_runs(
+    session: Session,
+    project_id: int,
+    *,
+    branch: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[TestRun]:
+    query = select(TestRun).where(TestRun.project_id == project_id)
+    if branch is not None:
+        query = query.where(TestRun.branch == branch)
+    query = (
+        query.order_by(TestRun.ingested_at.desc(), TestRun.id.desc()).limit(limit).offset(offset)
+    )
+    return list(session.scalars(query))
+
+
+def count_project_runs(session: Session, project_id: int, *, branch: Optional[str] = None) -> int:
+    query = select(func.count()).select_from(TestRun).where(TestRun.project_id == project_id)
+    if branch is not None:
+        query = query.where(TestRun.branch == branch)
+    return session.scalar(query) or 0
+
+
+def get_project_run(session: Session, project_id: int, run_id: int) -> Optional[TestRun]:
+    return session.scalar(
+        select(TestRun).where(TestRun.project_id == project_id, TestRun.id == run_id)
+    )
+
+
+def get_project_run_summary(
+    session: Session, project_id: int, run_id: int
+) -> Optional[TestRunSummary]:
+    passed = func.count(TestResult.id).filter(TestResult.outcome == TestOutcome.PASSED)
+    failed = func.count(TestResult.id).filter(TestResult.outcome == TestOutcome.FAILED)
+    skipped = func.count(TestResult.id).filter(TestResult.outcome == TestOutcome.SKIPPED)
+    error = func.count(TestResult.id).filter(TestResult.outcome == TestOutcome.ERROR)
+    row = session.execute(
+        select(
+            TestRun,
+            func.count(TestResult.id),
+            passed,
+            failed,
+            skipped,
+            error,
+        )
+        .outerjoin(TestResult, TestResult.test_run_id == TestRun.id)
+        .where(TestRun.project_id == project_id, TestRun.id == run_id)
+        .group_by(TestRun.id)
+    ).one_or_none()
+    if row is None:
+        return None
+    return TestRunSummary(
+        run=row[0],
+        total=row[1],
+        passed=row[2],
+        failed=row[3],
+        skipped=row[4],
+        error=row[5],
+    )
+
+
+def count_run_results(
+    session: Session, run_id: int, *, outcome: Optional[TestOutcome] = None
+) -> int:
+    query = select(func.count()).select_from(TestResult).where(TestResult.test_run_id == run_id)
+    if outcome is not None:
+        query = query.where(TestResult.outcome == outcome)
+    return session.scalar(query) or 0
+
+
+def list_run_results(
+    session: Session,
+    run_id: int,
+    *,
+    outcome: Optional[TestOutcome] = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[TestResult]:
+    query = (
+        select(TestResult)
+        .where(TestResult.test_run_id == run_id)
+        .options(selectinload(TestResult.test_case))
+    )
+    if outcome is not None:
+        query = query.where(TestResult.outcome == outcome)
+    query = query.order_by(TestResult.id.asc()).limit(limit).offset(offset)
+    return list(session.scalars(query))

@@ -4,15 +4,29 @@ from database.db_operations.projects import get_project
 from database.db_operations.runs import (
     RunIngestionConflict,
     RunIngestionValidationError,
+    count_project_runs,
+    count_run_results,
+    get_project_run,
+    get_project_run_summary,
     get_test_run_with_results,
     ingest_test_run,
+    list_project_runs,
+    list_run_results,
 )
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from database.enums import TestOutcome
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 from testpulse.junit_parser import JUnitReportError, parse_junit_xml
 
-from api.project_routes import get_db_session
-from api.run_schemas import TestResultRead, TestRunRead
+from api.routes.project_routes import get_db_session
+from api.schemas.run_schemas import (
+    TestResultPage,
+    TestResultRead,
+    TestRunHistoryItem,
+    TestRunHistoryPage,
+    TestRunRead,
+    TestRunSummaryRead,
+)
 
 router = APIRouter(prefix="/api/v1/projects", tags=["test-runs"])
 
@@ -138,4 +152,99 @@ async def ingest_run_endpoint(
             )
             for result in loaded_run.test_results
         ],
+    )
+
+
+@router.get("/{project_id}/runs", response_model=TestRunHistoryPage)
+def list_runs_endpoint(
+    project_id: int,
+    branch: Optional[str] = None,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+) -> TestRunHistoryPage:
+    if get_project(session, project_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+    runs = list_project_runs(session, project_id, branch=branch, limit=limit, offset=offset)
+    return TestRunHistoryPage(
+        items=[TestRunHistoryItem.model_validate(run) for run in runs],
+        limit=limit,
+        offset=offset,
+        total=count_project_runs(session, project_id, branch=branch),
+    )
+
+
+@router.get("/{project_id}/runs/{run_id}", response_model=TestRunSummaryRead)
+def get_run_summary_endpoint(
+    project_id: int,
+    run_id: int,
+    session: Session = Depends(get_db_session),
+) -> TestRunSummaryRead:
+    if get_project(session, project_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+
+    summary = get_project_run_summary(session, project_id, run_id)
+    if summary is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Test run not found.",
+        )
+    return TestRunSummaryRead(
+        id=summary.run.id,
+        project_id=summary.run.project_id,
+        commit_sha=summary.run.commit_sha,
+        branch=summary.run.branch,
+        report_sha=summary.run.report_sha,
+        status=summary.run.status,
+        duration=summary.run.duration,
+        ingested_at=summary.run.ingested_at,
+        completed_at=summary.run.completed_at,
+        total=summary.total,
+        passed=summary.passed,
+        failed=summary.failed,
+        skipped=summary.skipped,
+        error=summary.error,
+    )
+
+
+@router.get(
+    "/{project_id}/runs/{run_id}/results",
+    response_model=TestResultPage,
+)
+def get_run_results_endpoint(
+    project_id: int,
+    run_id: int,
+    outcome: Optional[TestOutcome] = Query(default=None, alias="status"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_db_session),
+) -> TestResultPage:
+    if get_project(session, project_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    run = get_project_run(session, project_id, run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Test run not found.",
+        )
+
+    results = list_run_results(session, run_id, outcome=outcome, limit=limit, offset=offset)
+    return TestResultPage(
+        items=[
+            TestResultRead(
+                id=result.id,
+                test_case_id=result.test_case_id,
+                name=result.test_case.name,
+                class_name=result.test_case.class_name,
+                outcome=result.outcome,
+                duration=result.duration,
+                error_message=result.error_message,
+                traceback=result.traceback,
+            )
+            for result in results
+        ],
+        limit=limit,
+        offset=offset,
+        total=count_run_results(session, run_id, outcome=outcome),
     )

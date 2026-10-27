@@ -9,7 +9,7 @@ from database.db_operations.projects import (
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from api.project_schemas import ProjectCreate, ProjectRead
+from api.schemas.project_schemas import ProjectCreate, ProjectRead
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
