@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -62,6 +62,14 @@ def upload_run(
     )
     assert response.status_code == 201
     return response.json()
+
+
+def set_run_time(client: TestClient, run_id: int, ingested_at: datetime) -> None:
+    with Session(client.app.state.database_engine) as session:
+        run = session.get(RunEntity, run_id)
+        assert run is not None
+        run.ingested_at = ingested_at
+        session.commit()
 
 
 def test_ingests_report_and_persists_results_with_metadata(client: TestClient) -> None:
@@ -242,6 +250,256 @@ def test_configured_test_case_limit_is_enforced(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert run_counts(client, project_id) == (0, 0)
+
+
+def test_reliability_api_reports_mixed_history_and_branch_filter(client: TestClient) -> None:
+    project_id = create_project(client)
+    for index, outcome in enumerate(["passed", "passed", "passed", "passed", "failed"]):
+        outcome_xml = '<failure message="failure"/>' if outcome == "failed" else ""
+        run = upload_run(
+            client,
+            project_id,
+            f'<testsuite><testcase classname="sample.Case" name="flaky">{outcome_xml}'
+            "</testcase></testsuite>",
+            branch="main",
+        )
+        set_run_time(
+            client,
+            run["id"],
+            datetime(2025, 1, 1, tzinfo=timezone.utc) + timedelta(days=index),
+        )
+    upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="other.Case" name="only-other-branch"/></testsuite>',
+        branch="release",
+    )
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/analysis/reliability",
+        params={"branch": "main", "window_size": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["window_size"] == 5
+    assert response.json()["minimum_observations"] == 5
+    assert len(response.json()["tests"]) == 1
+    assert response.json()["tests"][0]["reliability"] == "potentially_flaky"
+    assert response.json()["tests"][0]["failure_rate"] == 0.2
+    assert response.json()["tests"][0]["potentially_flaky"] is True
+
+
+def test_reliability_api_rejects_invalid_window_and_unknown_project(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+
+    invalid_window = client.get(
+        f"/api/v1/projects/{project_id}/analysis/reliability",
+        params={"window_size": 101},
+    )
+    unknown_project = client.get("/api/v1/projects/999999/analysis/reliability")
+
+    assert invalid_window.status_code == 422
+    assert unknown_project.status_code == 404
+
+
+def test_reliability_api_excludes_skipped_from_minimum_and_defaults(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    for index in range(4):
+        run = upload_run(
+            client,
+            project_id,
+            '<testsuite><testcase classname="sample.Case" name="not-enough"/></testsuite>',
+        )
+        set_run_time(
+            client,
+            run["id"],
+            datetime(2025, 2, 1, tzinfo=timezone.utc) + timedelta(days=index),
+        )
+    skipped = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="sample.Case" name="not-enough">'
+        "<skipped/></testcase></testsuite>",
+    )
+    set_run_time(client, skipped["id"], datetime(2025, 2, 5, tzinfo=timezone.utc))
+
+    response = client.get(f"/api/v1/projects/{project_id}/analysis/reliability")
+
+    assert response.status_code == 200
+    assert response.json()["window_size"] == 20
+    assert response.json()["minimum_observations"] == 5
+    test_result = response.json()["tests"][0]
+    assert test_result["observations"] == 4
+    assert test_result["reliability"] == "insufficient_data"
+
+
+def test_reliability_api_limits_history_to_latest_valid_observations(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    older_failure = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="sample.Case" name="windowed">'
+        "<failure/></testcase></testsuite>",
+    )
+    set_run_time(client, older_failure["id"], datetime(2025, 3, 1, tzinfo=timezone.utc))
+    for index in range(20):
+        run = upload_run(
+            client,
+            project_id,
+            '<testsuite><testcase classname="sample.Case" name="windowed"/></testsuite>',
+        )
+        set_run_time(
+            client,
+            run["id"],
+            datetime(2025, 3, 2, tzinfo=timezone.utc) + timedelta(days=index),
+        )
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/analysis/reliability",
+        params={"window_size": 20},
+    )
+
+    assert response.status_code == 200
+    test_result = response.json()["tests"][0]
+    assert test_result["observations"] == 20
+    assert test_result["failed"] == 0
+    assert test_result["failure_rate"] == 0
+    assert test_result["reliability"] == "stable"
+
+
+def test_regression_api_detects_only_new_pass_to_failure_changes(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    previous = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="regression"/>'
+        '<testcase classname="sample.Case" name="persistent"><failure/></testcase>'
+        '<testcase classname="sample.Case" name="still-passing"/>'
+        "</testsuite>",
+    )
+    current = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="regression"><failure/></testcase>'
+        '<testcase classname="sample.Case" name="persistent"><failure/></testcase>'
+        '<testcase classname="sample.Case" name="still-passing"/>'
+        '<testcase classname="sample.Case" name="new-failure"><failure/></testcase>'
+        "</testsuite>",
+    )
+    set_run_time(client, previous["id"], datetime(2025, 1, 1, tzinfo=timezone.utc))
+    set_run_time(client, current["id"], datetime(2025, 1, 2, tzinfo=timezone.utc))
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{current['id']}/regressions")
+
+    assert response.status_code == 200
+    assert response.json()["previous_run_id"] is not None
+    assert [item["name"] for item in response.json()["regressions"]] == ["regression"]
+
+
+def test_regression_api_never_compares_different_branches(client: TestClient) -> None:
+    project_id = create_project(client)
+    branch_a = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="test"><failure/></testcase>'
+        "</testsuite>",
+        branch="branch-a",
+    )
+    current = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="test"><failure/></testcase>'
+        "</testsuite>",
+        branch="branch-b",
+    )
+    set_run_time(client, branch_a["id"], datetime(2025, 1, 1, tzinfo=timezone.utc))
+    set_run_time(client, current["id"], datetime(2025, 1, 2, tzinfo=timezone.utc))
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{current['id']}/regressions")
+
+    assert response.status_code == 200
+    assert response.json()["branch"] == "branch-b"
+    assert response.json()["previous_run_id"] is None
+    assert response.json()["regressions"] == []
+
+
+def test_regression_api_uses_previous_run_from_same_branch(client: TestClient) -> None:
+    project_id = create_project(client)
+    branch_b_previous = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="sample.Case" name="test"/></testsuite>',
+        branch="branch-b",
+    )
+    branch_a = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="test"><failure/></testcase>'
+        "</testsuite>",
+        branch="branch-a",
+    )
+    current = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase classname="sample.Case" name="test"><failure/></testcase>'
+        "</testsuite>",
+        branch="branch-b",
+    )
+    set_run_time(client, branch_b_previous["id"], datetime(2025, 1, 1, tzinfo=timezone.utc))
+    set_run_time(client, branch_a["id"], datetime(2025, 1, 2, tzinfo=timezone.utc))
+    set_run_time(client, current["id"], datetime(2025, 1, 3, tzinfo=timezone.utc))
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{current['id']}/regressions")
+
+    assert response.status_code == 200
+    assert response.json()["previous_run_id"] == branch_b_previous["id"]
+    assert [item["name"] for item in response.json()["regressions"]] == ["test"]
+
+
+def test_regression_api_returns_404_for_missing_run(client: TestClient) -> None:
+    project_id = create_project(client)
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/999999/regressions")
+
+    assert response.status_code == 404
+
+
+def test_regression_api_returns_empty_list_when_no_regressions_exist(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    previous = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="sample.Case" name="passing"/></testsuite>',
+    )
+    current = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase classname="sample.Case" name="passing"/></testsuite>',
+    )
+    set_run_time(client, previous["id"], datetime(2025, 1, 1, tzinfo=timezone.utc))
+    set_run_time(client, current["id"], datetime(2025, 1, 2, tzinfo=timezone.utc))
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{current['id']}/regressions")
+
+    assert response.status_code == 200
+    assert response.json()["previous_run_id"] == previous["id"]
+    assert response.json()["regressions"] == []
 
 
 def test_run_history_is_newest_first_and_filters_by_branch(client: TestClient) -> None:

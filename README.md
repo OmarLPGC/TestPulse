@@ -65,6 +65,20 @@ Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persis
   individuales. Acepta `status` (`passed`, `failed`, `skipped` o `error`), `limit` (predeterminado
   `20`, máximo `100`) y `offset` (predeterminado `0`). Incluye el total correspondiente al filtro;
   estados no válidos devuelven `422` y proyectos o ejecuciones inexistentes devuelven `404`.
+- `GET /api/v1/projects/{project_id}/analysis/reliability`: analiza por test las últimas
+  observaciones de una rama opcional. Acepta `window_size` (predeterminado `20`, máximo `100`) y
+  excluye `skipped`. Se necesitan al menos 5 observaciones válidas para clasificar; una mezcla de
+  `passed` y `failed`/`error` se marca como `potentially_flaky`, mientras que fallos en todas las
+  observaciones se clasifican como `persistently_failing`. También informa la tasa de fallo,
+  calculada como `(failed + error) / observaciones válidas`.
+- `GET /api/v1/projects/{project_id}/runs/{run_id}/regressions`: compara la ejecución con la
+  ejecución cronológicamente anterior de la misma rama. Solo informa tests presentes en ambas que
+  cambian de `passed` a `failed` o `error`; los tests nuevos y los fallos persistentes no son nuevas
+  regresiones. Devuelve una lista vacía si no hay casos que cumplan las condiciones. Proyectos o
+  ejecuciones inexistentes devuelven `404`.
+
+Las reglas de ventana, clasificación de fiabilidad y comparación de regresiones se describen con
+detalle en [docs/analysis-engine.md](docs/analysis-engine.md).
 
 ## Migraciones, tests y calidad
 

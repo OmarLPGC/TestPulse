@@ -4,11 +4,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
+from testpulse.analysis import TestObservation
 from testpulse.junit_parser import ParsedJUnitReport, ParsedTestCase
 
 from database.enums import TestOutcome, TestRunStatus
@@ -295,3 +296,109 @@ def list_run_results(
         query = query.where(TestResult.outcome == outcome)
     query = query.order_by(TestResult.id.asc()).limit(limit).offset(offset)
     return list(session.scalars(query))
+
+
+def get_project_test_observations(
+    session: Session,
+    project_id: int,
+    *,
+    branch: Optional[str],
+    window_size: int,
+) -> list[TestObservation]:
+    ranked_results = (
+        select(
+            TestResult.id.label("result_id"),
+            func.row_number()
+            .over(
+                partition_by=TestResult.test_case_id,
+                order_by=(TestRun.ingested_at.desc(), TestRun.id.desc()),
+            )
+            .label("observation_rank"),
+        )
+        .join(TestRun, TestRun.id == TestResult.test_run_id)
+        .where(
+            TestResult.project_id == project_id,
+            TestResult.outcome != TestOutcome.SKIPPED,
+            TestRun.status.in_([TestRunStatus.COMPLETED, TestRunStatus.FAILED]),
+        )
+    )
+    if branch is not None:
+        ranked_results = ranked_results.where(TestRun.branch == branch)
+    ranked_subquery = ranked_results.subquery()
+    query = (
+        select(TestResult, TestCase, TestRun.id, TestRun.ingested_at)
+        .join(ranked_subquery, ranked_subquery.c.result_id == TestResult.id)
+        .join(TestCase, TestCase.id == TestResult.test_case_id)
+        .join(TestRun, TestRun.id == TestResult.test_run_id)
+        .where(ranked_subquery.c.observation_rank <= window_size)
+        .order_by(TestCase.id.asc(), TestRun.id.desc())
+    )
+    return [
+        TestObservation(
+            test_case_id=test_case.id,
+            run_id=run_id,
+            observed_at=observed_at,
+            name=test_case.name,
+            class_name=test_case.class_name,
+            outcome=result.outcome,
+        )
+        for result, test_case, run_id, observed_at in session.execute(query)
+    ]
+
+
+def get_run_regression_results(
+    session: Session,
+    project_id: int,
+    run_id: int,
+) -> Optional[tuple[TestRun, Optional[TestRun], list[TestObservation], list[TestObservation]]]:
+    current_run = session.scalar(
+        select(TestRun).where(TestRun.project_id == project_id, TestRun.id == run_id)
+    )
+    if current_run is None:
+        return None
+
+    previous_run = None
+    if current_run.branch is not None:
+        previous_run = session.scalar(
+            select(TestRun)
+            .where(
+                TestRun.project_id == project_id,
+                TestRun.branch == current_run.branch,
+                TestRun.id != current_run.id,
+                or_(
+                    TestRun.ingested_at < current_run.ingested_at,
+                    and_(
+                        TestRun.ingested_at == current_run.ingested_at,
+                        TestRun.id < current_run.id,
+                    ),
+                ),
+            )
+            .order_by(TestRun.ingested_at.desc(), TestRun.id.desc())
+            .limit(1)
+        )
+    if previous_run is None:
+        return current_run, None, [], []
+
+    current_results = _run_observations(session, current_run)
+    previous_results = _run_observations(session, previous_run)
+    return current_run, previous_run, current_results, previous_results
+
+
+def _run_observations(session: Session, run: TestRun) -> list[TestObservation]:
+    rows = session.execute(
+        select(TestResult, TestCase)
+        .join(TestCase, TestCase.id == TestResult.test_case_id)
+        .where(TestResult.test_run_id == run.id)
+        .order_by(TestCase.id.asc())
+    )
+    return [
+        TestObservation(
+            test_case_id=test_case.id,
+            run_id=run.id,
+            observed_at=run.ingested_at,
+            name=test_case.name,
+            class_name=test_case.class_name,
+            outcome=result.outcome,
+        )
+        for result, test_case in rows
+    ]
