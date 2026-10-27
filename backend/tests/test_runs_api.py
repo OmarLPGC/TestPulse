@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,22 @@ def run_counts(client: TestClient, project_id: int) -> tuple[int, int]:
             .where(ResultEntity.project_id == project_id)
         )
     return runs or 0, results or 0
+
+
+def upload_run(
+    client: TestClient,
+    project_id: int,
+    report: str,
+    *,
+    branch: str = "main",
+) -> dict:
+    response = client.post(
+        f"/api/v1/projects/{project_id}/runs",
+        content=report,
+        headers={"Content-Type": "application/xml", "X-Branch": branch},
+    )
+    assert response.status_code == 201
+    return response.json()
 
 
 def test_ingests_report_and_persists_results_with_metadata(client: TestClient) -> None:
@@ -225,3 +242,195 @@ def test_configured_test_case_limit_is_enforced(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert run_counts(client, project_id) == (0, 0)
+
+
+def test_run_history_is_newest_first_and_filters_by_branch(client: TestClient) -> None:
+    project_id = create_project(client)
+    first = upload_run(client, project_id, '<testsuite><testcase name="first"/></testsuite>')
+    second = upload_run(
+        client,
+        project_id,
+        '<testsuite><testcase name="second"/></testsuite>',
+        branch="release",
+    )
+    third = upload_run(client, project_id, '<testsuite><testcase name="third"/></testsuite>')
+
+    with Session(client.app.state.database_engine) as session:
+        tied_ingestion_time = datetime(2025, 1, 2, tzinfo=timezone.utc)
+        session.get(RunEntity, first["id"]).ingested_at = tied_ingestion_time
+        session.get(RunEntity, second["id"]).ingested_at = tied_ingestion_time
+        session.get(RunEntity, third["id"]).ingested_at = datetime(2025, 1, 3, tzinfo=timezone.utc)
+        session.commit()
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()["items"]] == [
+        third["id"],
+        second["id"],
+        first["id"],
+    ]
+    assert response.json()["total"] == 3
+    assert all("test_results" not in item for item in response.json()["items"])
+
+    filtered = client.get(f"/api/v1/projects/{project_id}/runs", params={"branch": "main"})
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == [third["id"], first["id"]]
+    assert filtered.json()["total"] == 2
+
+
+def test_run_history_pagination_has_no_duplicates(client: TestClient) -> None:
+    project_id = create_project(client)
+    runs = [
+        upload_run(
+            client,
+            project_id,
+            f'<testsuite><testcase name="case-{index}"/></testsuite>',
+        )
+        for index in range(5)
+    ]
+
+    first_page = client.get(f"/api/v1/projects/{project_id}/runs", params={"limit": 2, "offset": 0})
+    second_page = client.get(
+        f"/api/v1/projects/{project_id}/runs", params={"limit": 2, "offset": 2}
+    )
+    third_page = client.get(f"/api/v1/projects/{project_id}/runs", params={"limit": 2, "offset": 4})
+
+    assert first_page.status_code == second_page.status_code == third_page.status_code == 200
+    first_ids = [item["id"] for item in first_page.json()["items"]]
+    second_ids = [item["id"] for item in second_page.json()["items"]]
+    third_ids = [item["id"] for item in third_page.json()["items"]]
+    assert len(first_ids) == len(second_ids) == 2
+    assert len(third_ids) == 1
+    assert set(first_ids).isdisjoint(second_ids)
+    assert set(first_ids + second_ids).isdisjoint(third_ids)
+    assert set(first_ids + second_ids + third_ids) == {run["id"] for run in runs}
+
+
+@pytest.mark.parametrize("params", [{"limit": 101}, {"limit": 0}, {"offset": -1}])
+def test_history_rejects_invalid_pagination(client: TestClient, params: dict[str, int]) -> None:
+    project_id = create_project(client)
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs", params=params)
+
+    assert response.status_code == 422
+
+
+def test_run_details_return_sql_result_counts(client: TestClient) -> None:
+    project_id = create_project(client)
+    run = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase name="passed"/>'
+        '<testcase name="failed"><failure/></testcase>'
+        '<testcase name="skipped"><skipped/></testcase>'
+        '<testcase name="errored"><error/></testcase>'
+        "</testsuite>",
+    )
+
+    response = client.get(f"/api/v1/projects/{project_id}/runs/{run['id']}")
+
+    assert response.status_code == 200
+    assert {
+        key: response.json()[key] for key in ("total", "passed", "failed", "skipped", "error")
+    } == {"total": 4, "passed": 1, "failed": 1, "skipped": 1, "error": 1}
+    assert response.json()["ingested_at"]
+    assert "test_results" not in response.json()
+
+
+def test_run_results_filter_by_status_and_paginate(client: TestClient) -> None:
+    project_id = create_project(client)
+    run = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase name="passed"/>'
+        '<testcase name="failed"><failure/></testcase>'
+        '<testcase name="failed-again"><failure/></testcase>'
+        '<testcase name="skipped"><skipped/></testcase>'
+        "</testsuite>",
+    )
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/runs/{run['id']}/results",
+        params={"status": "failed", "limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 2
+    assert response.json()["limit"] == 1
+    assert len(response.json()["items"]) == 1
+    assert response.json()["items"][0]["outcome"] == "failed"
+
+    invalid_status = client.get(
+        f"/api/v1/projects/{project_id}/runs/{run['id']}/results",
+        params={"status": "completed"},
+    )
+    assert invalid_status.status_code == 422
+
+
+def test_run_results_pagination_uses_stable_result_order(client: TestClient) -> None:
+    project_id = create_project(client)
+    run = upload_run(
+        client,
+        project_id,
+        "<testsuite>"
+        '<testcase name="first"/>'
+        '<testcase name="second"/>'
+        '<testcase name="third"/>'
+        "</testsuite>",
+    )
+
+    first_page = client.get(
+        f"/api/v1/projects/{project_id}/runs/{run['id']}/results",
+        params={"limit": 2, "offset": 0},
+    )
+    second_page = client.get(
+        f"/api/v1/projects/{project_id}/runs/{run['id']}/results",
+        params={"limit": 2, "offset": 2},
+    )
+
+    assert first_page.status_code == second_page.status_code == 200
+    first_ids = [item["id"] for item in first_page.json()["items"]]
+    second_ids = [item["id"] for item in second_page.json()["items"]]
+    assert len(first_ids) == 2
+    assert len(second_ids) == 1
+    assert set(first_ids).isdisjoint(second_ids)
+    assert first_page.json()["total"] == second_page.json()["total"] == 3
+
+
+@pytest.mark.parametrize("params", [{"limit": 101}, {"limit": 0}, {"offset": -1}])
+def test_run_results_reject_invalid_pagination(client: TestClient, params: dict[str, int]) -> None:
+    project_id = create_project(client)
+    run = upload_run(client, project_id, '<testsuite><testcase name="case"/></testsuite>')
+
+    response = client.get(
+        f"/api/v1/projects/{project_id}/runs/{run['id']}/results",
+        params=params,
+    )
+
+    assert response.status_code == 422
+
+
+def test_run_detail_and_results_return_404_for_missing_or_foreign_run(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client, "Owner")
+    other_project_id = create_project(client, "Other")
+    run = upload_run(client, project_id, '<testsuite><testcase name="ok"/></testsuite>')
+
+    missing_detail = client.get(f"/api/v1/projects/{project_id}/runs/999999")
+    foreign_detail = client.get(f"/api/v1/projects/{other_project_id}/runs/{run['id']}")
+    missing_results = client.get(f"/api/v1/projects/{project_id}/runs/999999/results")
+    foreign_results = client.get(f"/api/v1/projects/{other_project_id}/runs/{run['id']}/results")
+    missing_project = client.get("/api/v1/projects/999999/runs")
+
+    assert [
+        missing_detail.status_code,
+        foreign_detail.status_code,
+        missing_results.status_code,
+        foreign_results.status_code,
+        missing_project.status_code,
+    ] == [404, 404, 404, 404, 404]

@@ -46,6 +46,26 @@ Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persis
 - `GET /projects`: lista los proyectos registrados.
 - `GET /projects/{project_id}`: devuelve el proyecto o `404` si no existe.
 
+## Ingesta e historial de ejecuciones
+
+- `POST /api/v1/projects/{project_id}/runs`: recibe JUnit XML en el cuerpo y acepta `X-Commit-SHA`,
+  `X-Branch` e `Idempotency-Key` como encabezados opcionales. Devuelve `201` al crear la ejecución,
+  `200` al repetir una solicitud idéntica con la misma clave, `409` si se reutiliza la clave con
+  contenido o metadatos diferentes, `404` si el proyecto no existe, `413` si el informe excede el
+  límite configurado y `422` si el informe es inválido.
+- `GET /api/v1/projects/{project_id}/runs`: devuelve una página ligera del historial, ordenada por
+  fecha de ingesta descendente y, en caso de empate, por identificador descendente. Acepta `branch`
+  como filtro opcional, `limit` (predeterminado `20`, de `1` a `100`) y `offset` (predeterminado
+  `0`, no negativo). La respuesta incluye `items`, `limit`, `offset` y `total`; un proyecto
+  inexistente devuelve `404` y parámetros fuera de rango devuelven `422`.
+- `GET /api/v1/projects/{project_id}/runs/{run_id}`: devuelve los metadatos y los contadores
+  `total`, `passed`, `failed`, `skipped` y `error`, calculados en base de datos. Devuelve `404` si
+  el proyecto no existe o la ejecución no pertenece a él.
+- `GET /api/v1/projects/{project_id}/runs/{run_id}/results`: devuelve una página de pruebas
+  individuales. Acepta `status` (`passed`, `failed`, `skipped` o `error`), `limit` (predeterminado
+  `20`, máximo `100`) y `offset` (predeterminado `0`). Incluye el total correspondiente al filtro;
+  estados no válidos devuelven `422` y proyectos o ejecuciones inexistentes devuelven `404`.
+
 ## Migraciones, tests y calidad
 
 Las migraciones se ejecutan contra la URL definida por las variables `POSTGRES_*` o el archivo
