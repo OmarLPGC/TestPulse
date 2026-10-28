@@ -57,7 +57,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--idempotency-key",
         help=(
-            "Idempotency key. In GitHub Actions it is derived from the workflow, run, attempt, and project."
+            "Idempotency key. In GitHub Actions it is derived from the workflow, "
+            "run, attempt, and project."
         ),
     )
     parser.add_argument(
