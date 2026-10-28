@@ -89,7 +89,7 @@ def test_cli_uploads_report_to_test_api_and_preserves_metadata(
 
     output = capsys.readouterr()
     assert exit_code == 0
-    assert "Ejecución creada correctamente" in output.out
+    assert "Execution created successfully" in output.out
     history = api_client.get(f"/api/v1/projects/{project_id}/runs").json()
     assert len(history["items"]) == 1
     assert history["items"][0]["commit_sha"] == "abc123"
@@ -114,7 +114,7 @@ def test_cli_reports_missing_report_without_network_request(
 
     output = capsys.readouterr()
     assert exit_code != 0
-    assert "no se pudo leer el informe" in output.err
+    assert "could not read the report" in output.err
     assert "Traceback" not in output.err
 
 
@@ -146,7 +146,7 @@ def test_cli_reports_network_failure_without_traceback(
 
     output = capsys.readouterr()
     assert exit_code != 0
-    assert "Error de red" in output.err
+    assert "Network error" in output.err
     assert "Traceback" not in output.err
 
 
@@ -179,9 +179,9 @@ def test_cli_rejects_invalid_url_without_traceback(
 @pytest.mark.parametrize(
     ("status_code", "response_body", "expected_message"),
     [
-        (401, {"detail": "Unauthorized"}, "Autenticación rechazada"),
+        (401, {"detail": "Unauthorized"}, "Authentication rejected"),
         (422, {"detail": "JUnit XML is malformed."}, "JUnit XML is malformed."),
-        (500, {"detail": "internal stack trace"}, "error del servidor"),
+        (500, {"detail": "internal stack trace"}, "server error"),
     ],
 )
 def test_cli_http_errors_never_report_success(
@@ -220,7 +220,7 @@ def test_cli_http_errors_never_report_success(
     assert expected_message in output.err
     assert "internal stack trace" not in output.err
     assert "secret-token" not in output.err
-    assert "correctamente" not in output.out
+    assert "successfully" not in output.out
 
 
 def test_cli_reuses_explicit_idempotency_key_without_duplicating_run(
@@ -254,7 +254,7 @@ def test_cli_reuses_explicit_idempotency_key_without_duplicating_run(
     assert main(args, client_factory=client_factory) == 0
 
     output = capsys.readouterr()
-    assert "Ejecución reutilizada correctamente" in output.out
+    assert "Execution reused successfully" in output.out
     with Session(api_client.app.state.database_engine) as session:
         run_count = session.scalar(
             select(func.count()).select_from(RunEntity).where(RunEntity.project_id == project_id)
