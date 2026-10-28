@@ -80,6 +80,72 @@ Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persis
 Las reglas de ventana, clasificación de fiabilidad y comparación de regresiones se describen con
 detalle en [docs/analysis-engine.md](docs/analysis-engine.md).
 
+## Cliente CLI e integración con GitHub Actions
+
+Instala el paquete TestPulse para disponer del comando `testpulse`. Desde el repositorio:
+
+```powershell
+python -m pip install .
+```
+
+Genera el informe de pytest y envíalo indicando el endpoint y el ID del proyecto:
+
+```powershell
+python -m pytest --junitxml=test-results.xml
+testpulse --url https://testpulse.example.com --project 42 --report test-results.xml `
+  --commit $env:GITHUB_SHA --branch $env:GITHUB_REF_NAME
+```
+
+`--commit` y `--branch` son opcionales; el cliente los toma de `GITHUB_SHA` y `GITHUB_REF_NAME` o
+de `CI_COMMIT_SHA` y `CI_COMMIT_REF_NAME`. Se puede proporcionar `--idempotency-key` para reintentos
+manuales. En GitHub Actions se genera una clave estable por repositorio, ejecución, intento y
+proyecto. En ejecuciones locales sin esos metadatos se genera un UUID por invocación.
+`TESTPULSE_API_TOKEN` (o `--token`) se envía como `Authorization: Bearer ...`; no escribas el token
+directamente en los argumentos ni en el repositorio.
+
+Ejemplo de workflow para el proyecto que produce las pruebas:
+
+```yaml
+name: Tests and TestPulse
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m pip install pytest
+      - name: Install TestPulse CLI
+        run: python -m pip install "git+https://github.com/OmarLPGC/TestPulse.git"
+      - name: Run tests and generate JUnit XML
+        run: python -m pytest --junitxml=test-results.xml
+      - name: Upload results to TestPulse
+        if: always()
+        env:
+          TESTPULSE_URL: ${{ vars.TESTPULSE_URL }}
+          TESTPULSE_PROJECT_ID: ${{ vars.TESTPULSE_PROJECT_ID }}
+          TESTPULSE_API_TOKEN: ${{ secrets.TESTPULSE_API_TOKEN }}
+          TESTPULSE_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: >-
+          testpulse --url "$TESTPULSE_URL"
+          --project "$TESTPULSE_PROJECT_ID"
+          --report test-results.xml
+          --commit "$GITHUB_SHA"
+          --branch "$TESTPULSE_BRANCH"
+```
+
+El ejemplo instala el CLI desde este repositorio; si se distribuye como paquete o artefacto, usa
+esa fuente en el paso de instalación. Configura `TESTPULSE_URL` y `TESTPULSE_PROJECT_ID` como
+variables del repositorio y el token, si el servidor lo requiere, como secreto. El comando termina
+con código distinto de cero ante errores de red, autenticación, validación o servidor. `if: always()`
+intenta subir el informe aunque fallen los tests.
+
 ## Migraciones, tests y calidad
 
 Las migraciones se ejecutan contra la URL definida por las variables `POSTGRES_*` o el archivo
