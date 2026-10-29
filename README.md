@@ -80,6 +80,28 @@ Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persis
 Las reglas de ventana, clasificación de fiabilidad y comparación de regresiones se describen con
 detalle en [docs/analysis-engine.md](docs/analysis-engine.md).
 
+## Dashboard web
+
+El dashboard React/TypeScript permite explorar proyectos, filtrar el historial por rama, consultar
+el resumen y los resultados de una ejecución, ver trazas de fallos como texto y revisar tests
+potencialmente inestables o regresiones.
+
+Con la API y PostgreSQL iniciados, abre otra terminal desde la raíz del repositorio:
+
+```powershell
+Set-Location frontend
+npm ci
+npm run dev
+```
+
+Necesitas Node.js 22.12 o posterior. Abre <http://127.0.0.1:5173>. Vite reenvía `/projects` y `/api` a
+`http://127.0.0.1:8000`; cambia el destino con `TESTPULSE_API_TARGET` si la API escucha en otro
+host. Para desplegar el frontend y la API en orígenes diferentes, configura un proxy inverso de
+misma procedencia para esas rutas.
+
+Las pruebas del dashboard se ejecutan con `npm run test:run`; `npm run typecheck` valida TypeScript
+y `npm run build` genera la versión estática en `frontend/dist`.
+
 ## Cliente CLI e integración con GitHub Actions
 
 Instala el paquete TestPulse para disponer del comando `testpulse`. Desde el repositorio:
