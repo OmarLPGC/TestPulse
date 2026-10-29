@@ -1,0 +1,124 @@
+.reliability-page {
+  padding-top: 28px;
+}
+
+.reliability-page .section-heading p {
+  max-width: 640px;
+}
+
+.reliability-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #131f32;
+}
+
+.reliability-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reliability-table th {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.reliability-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.reliability-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.reliability-test {
+  min-width: 240px;
+}
+
+.reliability-test strong {
+  display: block;
+  max-width: 310px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.reliability-test small {
+  display: block;
+  max-width: 310px;
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.numeric-cell {
+  font-family: var(--mono);
+  text-align: right;
+}
+
+.reliability-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid #66503a;
+  border-radius: 4px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 10px;
+}
+
+.reliability-potentially_flaky {
+  border-color: #285447;
+  background: #162e31;
+  color: var(--pulse);
+}
+
+.table-footnote {
+  margin: 0;
+  padding: 11px 14px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-link {
+  display: block;
+  width: fit-content;
+  margin: 15px auto 0;
+  color: var(--pulse);
+  font-size: 13px;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 7px rgb(42 217 145 / 4%);
+    opacity: 0.7;
+  }
+}
+

@@ -91,6 +91,7 @@ describe("TestPulse dashboard", () => {
     const summary = await screen.findByRole("region", {
       name: "Latest execution summary",
     });
+    await waitFor(() => expect(summary).toHaveTextContent("3 tests"));
     expect(summary).toHaveTextContent("3 tests");
     expect(summary).toHaveTextContent("2 passed");
     expect(summary).toHaveTextContent("1 failed");

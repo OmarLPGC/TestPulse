@@ -6,6 +6,12 @@ export type Reliability =
   | "persistently_failing"
   | "insufficient_data";
 
+const TEST_OUTCOMES = new Set<string>(["passed", "failed", "skipped", "error"]);
+
+export function isTestOutcome(value: string): value is TestOutcome {
+  return TEST_OUTCOMES.has(value);
+}
+
 export interface Project {
   id: number;
   name: string;
