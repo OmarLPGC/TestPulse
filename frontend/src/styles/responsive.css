@@ -1,0 +1,331 @@
+@media (max-width: 1100px) {
+  .page-container {
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+
+  .workspace-topbar {
+    margin-right: -28px;
+    margin-left: -28px;
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+
+  .summary-value {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 820px) {
+  .sidebar {
+    position: static;
+    width: auto;
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 11px 18px;
+    border-right: 0;
+    border-bottom: 1px solid #1d2a3e;
+  }
+
+  .brand {
+    padding: 0;
+    font-size: 17px;
+  }
+
+  .side-navigation {
+    margin: 0;
+  }
+
+  .primary-link {
+    min-height: 36px;
+  }
+
+  .primary-link svg {
+    display: none;
+  }
+
+  .nav-count {
+    margin-left: 1px;
+  }
+
+  .sidebar-section,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .main-panel {
+    margin-left: 0;
+  }
+
+  .page-container {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .workspace-topbar {
+    margin-right: -22px;
+    margin-left: -22px;
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .brand {
+    gap: 6px;
+    font-size: 16px;
+  }
+
+  .brand .pulse-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .primary-link {
+    gap: 6px;
+    padding-right: 8px;
+    padding-left: 8px;
+    font-size: 12px;
+  }
+
+  .page-container {
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  .page-topline,
+  .workspace-topbar {
+    min-height: 52px;
+  }
+
+  .workspace-topbar {
+    margin-right: -15px;
+    margin-left: -15px;
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  .topline-caption {
+    display: none;
+  }
+
+  .projects-heading {
+    align-items: flex-start;
+    margin-top: 32px;
+  }
+
+  .projects-heading .heading-count {
+    padding-top: 9px;
+  }
+
+  .page-heading p {
+    max-width: 275px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .project-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .branch-control {
+    gap: 5px;
+    padding-right: 5px;
+    padding-left: 7px;
+  }
+
+  .branch-control select {
+    width: min(132px, 36vw);
+    font-size: 11px;
+  }
+
+  .project-title-row {
+    padding-top: 27px;
+  }
+
+  .project-title-row h1 {
+    max-width: 65vw;
+    overflow: hidden;
+    font-size: 25px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .repository-link {
+    max-width: 72vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .content-section {
+    margin-top: 23px;
+  }
+
+  .section-heading {
+    align-items: flex-start;
+  }
+
+  .latest-summary {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 11px;
+    padding: 12px;
+  }
+
+  .latest-summary-heading {
+    min-width: 0;
+  }
+
+  .latest-summary-content {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .latest-summary-counts {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 10px;
+  }
+
+  .latest-summary-link {
+    align-self: flex-end;
+  }
+
+  .run-row {
+    grid-template-columns: 3px minmax(0, 1fr) auto 12px;
+    gap: 10px;
+    min-height: 76px;
+    padding-right: 10px;
+  }
+
+  .run-row > .status-badge {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .run-row > .run-duration {
+    display: none;
+  }
+
+  .run-row > .run-open {
+    grid-column: 4;
+    grid-row: 1;
+  }
+
+  .run-identity {
+    display: grid;
+    gap: 3px;
+  }
+
+  .run-branch {
+    max-width: 52vw;
+  }
+
+  .run-meta {
+    gap: 8px;
+    font-size: 10px;
+  }
+
+  .status-badge {
+    padding: 5px 6px;
+    font-size: 10px;
+  }
+
+  .pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pagination > div {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .detail-heading h2 {
+    gap: 7px;
+  }
+
+  .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .summary-value {
+    padding: 11px 12px;
+    border-right: 1px solid var(--line-soft);
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .summary-value:nth-child(3n) {
+    border-right: 0;
+  }
+
+  .summary-value:nth-last-child(-n + 3) {
+    border-bottom: 0;
+  }
+
+  .summary-value strong {
+    font-size: 15px;
+  }
+
+  .regression-panel {
+    padding: 14px 12px;
+  }
+
+  .results-heading {
+    align-items: flex-start;
+  }
+
+  .result-item {
+    padding: 12px 10px;
+  }
+
+  .result-title-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .result-title-row .test-name-block {
+    flex-basis: calc(100% - 25px);
+  }
+
+  .result-title-row .status-badge {
+    margin-left: 15px;
+  }
+
+  .failure-detail {
+    margin-left: 15px;
+    padding: 9px;
+  }
+
+  .reliability-page {
+    padding-top: 22px;
+  }
+
+  .reliability-page .section-heading {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
