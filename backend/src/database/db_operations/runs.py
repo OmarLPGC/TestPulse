@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session, selectinload
 from testpulse.analysis import TestObservation
 from testpulse.junit_parser import ParsedJUnitReport, ParsedTestCase
 
-from database.enums import TestOutcome, TestRunStatus
+from database.enums import AnalysisJobStatus, TestOutcome, TestRunStatus
+from database.schemas.analysis_job_entity import (
+    DEFAULT_ANALYSIS_JOB_MAX_ATTEMPTS,
+    AnalysisJob,
+)
 from database.schemas.test_case_entity import TestCase
 from database.schemas.test_result_entity import TestResult
 from database.schemas.test_run_entity import TestRun
@@ -77,6 +81,15 @@ def ingest_test_run(
                     )
                     for test_case in report.test_cases
                 ]
+            )
+            session.flush()
+            session.add(
+                AnalysisJob(
+                    project_id=project_id,
+                    test_run_id=run.id,
+                    status=AnalysisJobStatus.PENDING,
+                    max_attempts=DEFAULT_ANALYSIS_JOB_MAX_ATTEMPTS,
+                )
             )
             session.flush()
     except IntegrityError:
@@ -304,6 +317,7 @@ def get_project_test_observations(
     *,
     branch: Optional[str],
     window_size: int,
+    through_run: Optional[TestRun] = None,
 ) -> list[TestObservation]:
     ranked_results = (
         select(
@@ -324,6 +338,8 @@ def get_project_test_observations(
     )
     if branch is not None:
         ranked_results = ranked_results.where(TestRun.branch == branch)
+    if through_run is not None:
+        ranked_results = ranked_results.where(TestRun.id <= through_run.id)
     ranked_subquery = ranked_results.subquery()
     query = (
         select(TestResult, TestCase, TestRun.id, TestRun.ingested_at)

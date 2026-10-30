@@ -14,3 +14,10 @@ class TestOutcome(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     ERROR = "error"
+
+
+class AnalysisJobStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"

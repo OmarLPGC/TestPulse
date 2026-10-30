@@ -76,9 +76,38 @@ Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persis
   cambian de `passed` a `failed` o `error`; los tests nuevos y los fallos persistentes no son nuevas
   regresiones. Devuelve una lista vacía si no hay casos que cumplan las condiciones. Proyectos o
   ejecuciones inexistentes devuelven `404`.
+- `GET /api/v1/projects/{project_id}/runs/{run_id}/analysis-job`: devuelve el trabajo duradero
+  asociado a la ejecución, incluyendo estado, intentos, último error y, al completarse, el snapshot
+  de fiabilidad y regresiones. Devuelve `404` si el proyecto o el trabajo no existen.
 
 Las reglas de ventana, clasificación de fiabilidad y comparación de regresiones se describen con
 detalle en [docs/analysis-engine.md](docs/analysis-engine.md).
+
+## Procesamiento asíncrono
+
+Cada informe válido crea un trabajo de análisis en la misma transacción que la ejecución y sus
+resultados. Repetir una ingesta idempotente devuelve la ejecución existente y conserva su único
+trabajo. Los estados posibles son `pending`, `processing`, `completed` y `failed`; se permiten tres
+intentos. Los errores se registran en el trabajo y en los logs del worker. Una concesión de cinco
+minutos permite recuperar trabajos cuyo proceso se haya detenido mientras los ejecutaba.
+
+La cola está respaldada por PostgreSQL y no necesita un broker externo: si no hay ningún worker
+activo, las tareas permanecen pendientes; al iniciar uno, las reclama desde la base de datos. El
+worker usa bloqueos de fila en PostgreSQL para coordinar varios procesos, y el análisis persistido
+es idempotente por ejecución. Las consultas básicas de proyectos, historial y resultados no
+requieren que haya workers activos.
+
+Inicia un worker en una terminal independiente, después de aplicar las migraciones:
+
+```powershell
+testpulse-worker
+```
+
+Para procesar como máximo un trabajo y salir, utiliza `testpulse-worker --once`. `--poll-interval`
+ajusta la espera entre consultas cuando la cola está vacía y `--lease-seconds` la duración de la
+concesión antes de recuperar un trabajo abandonado. Consulta el estado y el resultado con el
+endpoint `analysis-job` de la ejecución. Los endpoints de fiabilidad y regresiones existentes
+siguen disponibles y calculan sus respuestas directamente para conservar su comportamiento.
 
 ## Dashboard web
 

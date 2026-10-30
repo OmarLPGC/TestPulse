@@ -2,6 +2,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Optional
 
+from api.routes.analysis_job_routes import router as analysis_jobs_router
 from api.routes.analysis_routes import router as analysis_router
 from api.routes.project_routes import router as projects_router
 from api.routes.run_routes import router as runs_router
@@ -37,6 +38,7 @@ def create_app(
     application.include_router(projects_router)
     application.include_router(runs_router)
     application.include_router(analysis_router)
+    application.include_router(analysis_jobs_router)
 
     @application.get("/health", tags=["health"])
     def health() -> dict[str, str]:
