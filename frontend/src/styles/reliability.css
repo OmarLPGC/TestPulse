@@ -80,9 +80,15 @@
 }
 
 .reliability-potentially_flaky {
-  border-color: #285447;
-  background: #162e31;
-  color: var(--pulse);
+  border-color: #66503a;
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.reliability-persistently_failing {
+  border-color: #59404a;
+  background: var(--failure-soft);
+  color: var(--failure);
 }
 
 .table-footnote {
@@ -121,4 +127,3 @@
     opacity: 0.7;
   }
 }
-

@@ -228,6 +228,18 @@ describe("TestPulse dashboard", () => {
               reliability: "potentially_flaky",
               potentially_flaky: true,
             },
+            {
+              test_case_id: 22,
+              name: "test_database_connection",
+              class_name: "tests.test_database",
+              observations: 10,
+              passed: 0,
+              failed: 10,
+              errors: 0,
+              failure_rate: 1,
+              reliability: "persistently_failing",
+              potentially_flaky: false,
+            },
           ],
         });
       }
@@ -236,7 +248,12 @@ describe("TestPulse dashboard", () => {
     renderAt("/project/1/reliability");
 
     expect(await screen.findByText("test_intermittent_timeout")).toBeInTheDocument();
-    expect(screen.getByText("Potentially flaky")).toBeInTheDocument();
+    expect(screen.getByText("Potentially flaky")).toHaveClass(
+      "reliability-potentially_flaky",
+    );
+    expect(screen.getByText("Persistent failure")).toHaveClass(
+      "reliability-persistently_failing",
+    );
     const row = screen.getByRole("row", { name: /test_intermittent_timeout/ });
     expect(within(row).getByText("20%")).toBeInTheDocument();
     expect(within(row).getByText("10")).toBeInTheDocument();
