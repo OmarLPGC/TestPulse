@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 testpulse = "testpulse.cli:main"
+testpulse-worker = "testpulse.worker:main"
 
 [tool.setuptools.packages.find]
 where = ["backend/src"]

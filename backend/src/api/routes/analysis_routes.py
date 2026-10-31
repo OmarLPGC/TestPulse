@@ -7,7 +7,12 @@ from database.db_operations.runs import (
 )
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from testpulse.analysis import analyze_test_reliability, detect_regressions
+from testpulse.analysis import (
+    DEFAULT_WINDOW_SIZE,
+    MINIMUM_OBSERVATIONS,
+    analyze_test_reliability,
+    detect_regressions,
+)
 
 from api.routes.project_routes import get_db_session
 from api.schemas.analysis_schemas import (
@@ -19,8 +24,6 @@ from api.schemas.analysis_schemas import (
 
 router = APIRouter(prefix="/api/v1/projects", tags=["analysis"])
 
-DEFAULT_WINDOW_SIZE = 20
-MINIMUM_OBSERVATIONS = 5
 MAX_WINDOW_SIZE = 100
 
 

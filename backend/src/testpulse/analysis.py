@@ -7,6 +7,9 @@ from typing import Optional
 
 from database.enums import TestOutcome
 
+DEFAULT_WINDOW_SIZE = 20
+MINIMUM_OBSERVATIONS = 5
+
 
 class TestReliability(str, Enum):
     INSUFFICIENT_DATA = "insufficient_data"

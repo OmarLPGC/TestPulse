@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
+    from database.schemas.analysis_job_entity import AnalysisJob
     from database.schemas.project_entity import Project
     from database.schemas.test_result_entity import TestResult
 
@@ -67,4 +68,9 @@ class TestRun(Base):
         back_populates="test_run",
         cascade="all, delete-orphan",
         overlaps="test_case,test_results",
+    )
+    analysis_job: Mapped[Optional[AnalysisJob]] = relationship(
+        back_populates="test_run",
+        cascade="all, delete-orphan",
+        uselist=False,
     )

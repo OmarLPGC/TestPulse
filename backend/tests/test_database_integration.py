@@ -6,6 +6,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from database import (
+    AnalysisJob,
+    AnalysisJobStatus,
     Project,
 )
 from database import TestCase as AtomicTestCaseEntity
@@ -21,6 +23,7 @@ from database import (
 from database import (
     TestRun as RunEntity,
 )
+from database.db_operations.analysis_jobs import claim_next_analysis_job
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.engine import make_url
@@ -112,7 +115,14 @@ def create_test_case(
 def test_initial_migration_creates_all_tables(postgres_engine) -> None:
     tables = set(inspect(postgres_engine).get_table_names())
 
-    assert {"projects", "test_runs", "test_cases", "test_results", "alembic_version"} <= tables
+    assert {
+        "projects",
+        "test_runs",
+        "test_cases",
+        "test_results",
+        "analysis_jobs",
+        "alembic_version",
+    } <= tables
 
 
 def test_project_is_persisted(postgres_engine, session: Session) -> None:
@@ -129,6 +139,35 @@ def test_project_is_persisted(postgres_engine, session: Session) -> None:
     assert persisted.description == "Integration test"
     assert persisted.created_at is not None
     assert persisted.updated_at is not None
+
+
+def test_workers_do_not_claim_the_same_analysis_job_concurrently(postgres_engine) -> None:
+    with Session(postgres_engine) as setup_session:
+        project = create_project(setup_session)
+        run = create_test_run(setup_session, project.id)
+        job = AnalysisJob(
+            project_id=project.id,
+            test_run_id=run.id,
+            status=AnalysisJobStatus.PENDING,
+        )
+        setup_session.add(job)
+        setup_session.commit()
+
+    first_worker = Session(postgres_engine)
+    second_worker = Session(postgres_engine)
+    try:
+        first_worker.begin()
+        first_claim = claim_next_analysis_job(first_worker, lease_seconds=300)
+        assert first_claim is not None
+
+        second_worker.begin()
+        second_claim = claim_next_analysis_job(second_worker, lease_seconds=300)
+        assert second_claim is None
+    finally:
+        second_worker.rollback()
+        first_worker.rollback()
+        second_worker.close()
+        first_worker.close()
 
 
 def test_duplicate_project_name_is_rejected_by_postgres(session: Session) -> None:
