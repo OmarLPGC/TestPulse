@@ -5,10 +5,14 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from api.dependencies import get_current_user
 from database import (
     AnalysisJob,
     AnalysisJobStatus,
     Project,
+    User,
+    Workspace,
+    WorkspaceMembership,
 )
 from database import TestCase as AtomicTestCaseEntity
 from database import (
@@ -90,7 +94,10 @@ def session(postgres_engine):
 
 
 def create_project(session: Session, name: str = "TestPulse") -> Project:
-    project = Project(name=f"{name}-{uuid4().hex}")
+    workspace = Workspace(name=f"{name}-workspace-{uuid4().hex}")
+    session.add(workspace)
+    session.flush()
+    project = Project(workspace_id=workspace.id, name=f"{name}-{uuid4().hex}")
     session.add(project)
     session.flush()
     return project
@@ -121,12 +128,25 @@ def test_initial_migration_creates_all_tables(postgres_engine) -> None:
         "test_cases",
         "test_results",
         "analysis_jobs",
+        "users",
+        "user_sessions",
+        "workspaces",
+        "workspace_memberships",
+        "oauth_states",
+        "project_ingestion_tokens",
         "alembic_version",
     } <= tables
 
 
 def test_project_is_persisted(postgres_engine, session: Session) -> None:
-    project = Project(name=f"Persisted-{uuid4().hex}", description="Integration test")
+    workspace = Workspace(name=f"Persisted-workspace-{uuid4().hex}")
+    session.add(workspace)
+    session.flush()
+    project = Project(
+        workspace_id=workspace.id,
+        name=f"Persisted-{uuid4().hex}",
+        description="Integration test",
+    )
     session.add(project)
     session.flush()
     project_id = project.id
@@ -172,18 +192,37 @@ def test_workers_do_not_claim_the_same_analysis_job_concurrently(postgres_engine
 
 def test_duplicate_project_name_is_rejected_by_postgres(session: Session) -> None:
     name = f"Duplicate-{uuid4().hex}"
-    session.add_all([Project(name=name), Project(name=name)])
+    workspace = Workspace(name=f"Duplicate-workspace-{uuid4().hex}")
+    session.add(workspace)
+    session.flush()
+    session.add_all(
+        [
+            Project(workspace_id=workspace.id, name=name),
+            Project(workspace_id=workspace.id, name=name),
+        ]
+    )
 
     with pytest.raises(IntegrityError) as error:
         session.flush()
 
     assert error.value.orig.sqlstate == "23505"
-    assert error.value.orig.diag.constraint_name == "uq_projects_name"
+    assert error.value.orig.diag.constraint_name == "uq_projects_workspace_name"
 
 
 def test_project_api_persists_across_app_connection_restart(postgres_engine) -> None:
     settings = Settings(app_env="test", database_url=postgres_engine.url)
+    with Session(postgres_engine) as session:
+        user = User(github_user_id=987654, github_login="api-integration-user")
+        workspace = Workspace(name=f"API-{uuid4().hex}", is_personal=True)
+        session.add_all((user, workspace))
+        session.flush()
+        session.add(
+            WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role="owner")
+        )
+        session.commit()
+        session.expunge(user)
     app = create_app(settings, database_engine=postgres_engine)
+    app.dependency_overrides[get_current_user] = lambda: user
     with TestClient(app) as client:
         created = client.post("/projects", json={"name": f"Persistent-{uuid4().hex}"})
         duplicate = client.post("/projects", json={"name": created.json()["name"]})
@@ -194,6 +233,7 @@ def test_project_api_persists_across_app_connection_restart(postgres_engine) -> 
     postgres_engine.dispose()
 
     restarted_app = create_app(settings, database_engine=postgres_engine)
+    restarted_app.dependency_overrides[get_current_user] = lambda: user
     with TestClient(restarted_app) as client:
         recovered = client.get(f"/projects/{project_id}")
 

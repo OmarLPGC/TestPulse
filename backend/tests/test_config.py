@@ -68,3 +68,39 @@ def test_junit_ingestion_limits_reject_invalid_values(setting: str, value: str) 
 
     with pytest.raises(ConfigurationError):
         Settings.from_environment(values)
+
+
+def test_github_app_configuration_requires_encryption_key_and_matching_origin() -> None:
+    values = {
+        "POSTGRES_DB": "testpulse",
+        "POSTGRES_USER": "testpulse",
+        "POSTGRES_PASSWORD": "local-only",
+        "GITHUB_APP_CLIENT_ID": "client-id",
+        "GITHUB_APP_CLIENT_SECRET": "client-secret",
+        "GITHUB_APP_CALLBACK_URL": "https://testpulse.example/api/v1/auth/github/callback",
+        "PUBLIC_BASE_URL": "https://testpulse.example",
+        "GITHUB_TOKEN_ENCRYPTION_KEY": "invalid-key",
+    }
+
+    with pytest.raises(ConfigurationError, match="32 random bytes"):
+        Settings.from_environment(values)
+
+
+def test_github_app_configuration_rejects_partial_credentials() -> None:
+    values = {
+        "POSTGRES_DB": "testpulse",
+        "POSTGRES_USER": "testpulse",
+        "POSTGRES_PASSWORD": "local-only",
+        "GITHUB_APP_CLIENT_ID": "client-id",
+    }
+
+    with pytest.raises(ConfigurationError, match="configured together"):
+        Settings.from_environment(values)
+
+
+def test_production_requires_https_github_configuration() -> None:
+    with pytest.raises(ConfigurationError, match="required in production"):
+        Settings(
+            app_env="production",
+            database_url=URL.create("postgresql", database="testpulse"),
+        )

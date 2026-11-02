@@ -1,0 +1,14 @@
+.env
+.env.*
+.git
+.venv
+.pytest_cache
+.ruff_cache
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+frontend
+node_modules
+postgres_data

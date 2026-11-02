@@ -39,20 +39,55 @@ La API estará disponible en <http://127.0.0.1:8000>; la comprobación de salud 
 Para detener PostgreSQL, ejecuta `docker compose down`. Los datos locales persisten en el volumen
 `postgres_data`; `docker compose down -v` también elimina ese volumen.
 
+Para levantar API y worker en contenedores junto a PostgreSQL, usa el perfil self-hosted:
+
+```powershell
+docker compose --profile self-hosted up -d --build
+```
+
+La API se publica por defecto solo en `127.0.0.1`; coloca un proxy HTTPS delante en despliegues.
+Consulta [docs/authentication-and-self-hosting.md](docs/authentication-and-self-hosting.md) para
+configurar la GitHub App, las cookies, la clave de cifrado, el workspace legado y los secrets de CI.
+El despliegue Compose de este alcance es backend-only; el empaquetado del dashboard se configura
+por separado.
+
+## Autenticación y workspaces
+
+Las rutas de proyectos, ejecuciones, análisis y jobs requieren una sesión iniciada mediante la
+GitHub App. La sesión usa una cookie opaca `HttpOnly`; `/api/v1/auth/me` devuelve el perfil y el
+`X-CSRF-Token` que debe acompañar las operaciones de escritura. `GET /api/v1/workspaces` lista los
+workspaces disponibles. Los members pueden consultar recursos; solo owners pueden crear proyectos,
+gestionar miembros, conectar repositorios y administrar tokens CI.
+
+Cada proyecto pertenece a un workspace. Los proyectos preexistentes se migran a un workspace
+legado sin miembros, que solo puede reclamar la cuenta GitHub configurada en
+`TESTPULSE_BOOTSTRAP_GITHUB_USER_ID` a través de `POST /api/v1/workspaces/legacy/claim`.
+
 ## API de proyectos
 
-- `POST /projects`: crea un proyecto con `name` y `repository_url` opcional. Devuelve `201`; los
-  nombres vacíos o URL inválidas devuelven `422` y los nombres duplicados `409`.
-- `GET /projects`: lista los proyectos registrados.
-- `GET /projects/{project_id}`: devuelve el proyecto o `404` si no existe.
+- `POST /projects`: crea un proyecto con `name` y `repository_url` opcional en el workspace personal
+  o en el `workspace_id` indicado. Requiere rol owner. Devuelve `201`; nombres vacíos o URL inválidas
+  devuelven `422` y nombres duplicados en el mismo workspace `409`.
+- `GET /projects`: lista los proyectos de los workspaces accesibles a la sesión.
+- `GET /projects/{project_id}`: devuelve un proyecto accesible o `404`.
+- `POST /api/v1/workspaces`: crea un workspace con el usuario actual como owner.
+- `GET /api/v1/workspaces/{workspace_id}/members` y las operaciones `POST`/`DELETE` sobre esa ruta
+  permiten consultar y administrar miembros; solo owners pueden modificar membresías.
+- `GET /api/v1/github/repositories`: enumera repositorios GitHub accesibles de forma paginada.
+  Owners conectan o desconectan el repositorio seleccionado desde
+  `/api/v1/projects/{project_id}/repository`; no se importan repositorios en lote.
+- `POST /api/v1/projects/{project_id}/ingestion-tokens`: crea un token de ingesta limitado a un
+  proyecto, visible solo en la respuesta de creación. Owners pueden revocarlo mediante `DELETE` y
+  listar metadatos sin recuperar el secreto.
 
 ## Ingesta e historial de ejecuciones
 
-- `POST /api/v1/projects/{project_id}/runs`: recibe JUnit XML en el cuerpo y acepta `X-Commit-SHA`,
-  `X-Branch` e `Idempotency-Key` como encabezados opcionales. Devuelve `201` al crear la ejecución,
-  `200` al repetir una solicitud idéntica con la misma clave, `409` si se reutiliza la clave con
-  contenido o metadatos diferentes, `404` si el proyecto no existe, `413` si el informe excede el
-  límite configurado y `422` si el informe es inválido.
+- `POST /api/v1/projects/{project_id}/runs`: requiere `Authorization: Bearer <project-token>` y
+  recibe JUnit XML en el cuerpo. Acepta `X-Commit-SHA`, `X-Branch`, `Idempotency-Key` y metadata
+  opcional `X-CI-*`. El token solo autoriza ingesta del proyecto asociado. Devuelve `201` al crear
+  la ejecución, `200` al repetir una solicitud idéntica con la misma clave, `409` si se reutiliza
+  con contenido o metadata diferente, `401` si falta o no es válido el token, `413` si el informe
+  excede el límite configurado y `422` si el informe es inválido.
 - `GET /api/v1/projects/{project_id}/runs`: devuelve una página ligera del historial, ordenada por
   fecha de ingesta descendente y, en caso de empate, por identificador descendente. Acepta `branch`
   como filtro opcional, `limit` (predeterminado `20`, de `1` a `100`) y `offset` (predeterminado
@@ -114,6 +149,10 @@ siguen disponibles y calculan sus respuestas directamente para conservar su comp
 El dashboard React/TypeScript permite explorar proyectos, filtrar el historial por rama, consultar
 el resumen y los resultados de una ejecución, ver trazas de fallos como texto y revisar tests
 potencialmente inestables o regresiones.
+
+Las rutas de datos ahora requieren una sesión GitHub y las escrituras requieren `X-CSRF-Token`.
+La integración de login y CSRF del dashboard queda fuera de este alcance backend-only; hasta que el
+frontend la implemente, el dashboard existente no podrá consultar ni modificar estos datos.
 
 Con la API y PostgreSQL iniciados, abre otra terminal desde la raíz del repositorio:
 

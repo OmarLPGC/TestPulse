@@ -2,21 +2,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from database import Base
 from fastapi.testclient import TestClient
-from sqlalchemy.engine import URL
-from testpulse.app import create_app
-from testpulse.config import Settings
+from test_support import create_authenticated_test_app
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
-    settings = Settings(
-        app_env="test",
-        database_url=URL.create("sqlite", database=str(tmp_path / "projects.db")),
-    )
-    app = create_app(settings)
-    Base.metadata.create_all(app.state.database_engine)
+    app, _ = create_authenticated_test_app(tmp_path / "projects.db")
     with TestClient(app) as test_client:
         yield test_client
 

@@ -39,8 +39,22 @@ def ingest_test_run(
     commit_sha: Optional[str],
     branch: Optional[str],
     idempotency_key: Optional[str],
+    ci_source: Optional[str] = None,
+    ci_run_id: Optional[str] = None,
+    ci_run_attempt: Optional[str] = None,
+    ci_event: Optional[str] = None,
+    ci_pull_request: Optional[str] = None,
 ) -> tuple[TestRun, bool]:
-    request_fingerprint = _request_fingerprint(report_content, commit_sha, branch)
+    ci_metadata = {
+        "ci_source": ci_source,
+        "ci_run_id": ci_run_id,
+        "ci_run_attempt": ci_run_attempt,
+        "ci_event": ci_event,
+        "ci_pull_request": ci_pull_request,
+    }
+    request_fingerprint = _request_fingerprint(
+        report_content, commit_sha, branch, ci_metadata=ci_metadata
+    )
     existing = _find_idempotent_run(session, project_id, idempotency_key)
     if existing is not None:
         _ensure_same_request(existing, request_fingerprint)
@@ -56,6 +70,7 @@ def ingest_test_run(
         project_id=project_id,
         commit_sha=commit_sha,
         branch=branch,
+        **ci_metadata,
         report_sha=hashlib.sha256(report_content).hexdigest(),
         request_fingerprint=request_fingerprint,
         idempotency_key=idempotency_key,
@@ -202,12 +217,21 @@ def _node_id(test_case: ParsedTestCase) -> str:
 
 
 def _request_fingerprint(
-    report_content: bytes, commit_sha: Optional[str], branch: Optional[str]
+    report_content: bytes,
+    commit_sha: Optional[str],
+    branch: Optional[str],
+    *,
+    ci_metadata: Optional[dict[str, Optional[str]]] = None,
 ) -> str:
     digest = hashlib.sha256()
     for value in (report_content, (commit_sha or "").encode(), (branch or "").encode()):
         digest.update(len(value).to_bytes(8, "big"))
         digest.update(value)
+    if ci_metadata and any(ci_metadata.values()):
+        metadata = json.dumps(ci_metadata, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        digest.update(b"testpulse-ci-metadata-v1")
+        digest.update(len(metadata).to_bytes(8, "big"))
+        digest.update(metadata)
     return digest.hexdigest()
 
 

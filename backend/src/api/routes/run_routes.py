@@ -1,6 +1,6 @@
 from typing import Optional
 
-from database.db_operations.projects import get_project
+from database.db_operations.ingestion_tokens import authenticate_ingestion_token
 from database.db_operations.runs import (
     RunIngestionConflict,
     RunIngestionValidationError,
@@ -14,11 +14,13 @@ from database.db_operations.runs import (
     list_run_results,
 )
 from database.enums import TestOutcome
+from database.schemas.user_entity import User
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 from testpulse.junit_parser import JUnitReportError, parse_junit_xml
 
-from api.routes.project_routes import get_db_session
+from api.authz import require_project_member
+from api.dependencies import get_current_user, get_db_session
 from api.schemas.run_schemas import (
     TestResultPage,
     TestResultRead,
@@ -67,15 +69,36 @@ async def ingest_run_endpoint(
     commit_sha: Optional[str] = Header(default=None, alias="X-Commit-SHA"),
     branch: Optional[str] = Header(default=None, alias="X-Branch"),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    ci_source: Optional[str] = Header(default=None, alias="X-CI-Source"),
+    ci_run_id: Optional[str] = Header(default=None, alias="X-CI-Run-ID"),
+    ci_run_attempt: Optional[str] = Header(default=None, alias="X-CI-Run-Attempt"),
+    ci_event: Optional[str] = Header(default=None, alias="X-CI-Event"),
+    ci_pull_request: Optional[str] = Header(default=None, alias="X-CI-Pull-Request"),
 ) -> TestRunRead:
-    project = get_project(session, project_id)
-    if project is None:
+    scheme, _, raw_token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip() or len(raw_token) > 512:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Project not found.",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A project ingestion token is required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = authenticate_ingestion_token(session, project_id, raw_token.strip())
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Project ingestion token is invalid, expired, or revoked.",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     settings = request.app.state.settings
+    metadata_limits = {
+        "X-CI-Source": (ci_source, 100),
+        "X-CI-Run-ID": (ci_run_id, 255),
+        "X-CI-Run-Attempt": (ci_run_attempt, 64),
+        "X-CI-Event": (ci_event, 100),
+        "X-CI-Pull-Request": (ci_pull_request, 64),
+    }
     if commit_sha is not None and len(commit_sha) > 40:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -86,6 +109,12 @@ async def ingest_run_endpoint(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="X-Branch must not exceed 255 characters.",
         )
+    for header, (value, limit) in metadata_limits.items():
+        if value is not None and (not value.strip() or len(value) > limit):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"{header} must contain 1 to {limit} non-whitespace characters.",
+            )
     if idempotency_key is not None and (not idempotency_key.strip() or len(idempotency_key) > 255):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -108,12 +137,17 @@ async def ingest_run_endpoint(
     try:
         run, created = ingest_test_run(
             session,
-            project_id=project.id,
+            project_id=project_id,
             report=report,
             report_content=report_content,
             commit_sha=commit_sha,
             branch=branch,
             idempotency_key=idempotency_key.strip() if idempotency_key else None,
+            ci_source=ci_source,
+            ci_run_id=ci_run_id,
+            ci_run_attempt=ci_run_attempt,
+            ci_event=ci_event,
+            ci_pull_request=ci_pull_request,
         )
     except RunIngestionConflict as error:
         raise HTTPException(
@@ -136,6 +170,11 @@ async def ingest_run_endpoint(
         project_id=loaded_run.project_id,
         commit_sha=loaded_run.commit_sha,
         branch=loaded_run.branch,
+        ci_source=loaded_run.ci_source,
+        ci_run_id=loaded_run.ci_run_id,
+        ci_run_attempt=loaded_run.ci_run_attempt,
+        ci_event=loaded_run.ci_event,
+        ci_pull_request=loaded_run.ci_pull_request,
         report_sha=loaded_run.report_sha,
         status=loaded_run.status,
         duration=loaded_run.duration,
@@ -162,9 +201,9 @@ def list_runs_endpoint(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> TestRunHistoryPage:
-    if get_project(session, project_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    require_project_member(session, project_id, current_user)
 
     runs = list_project_runs(session, project_id, branch=branch, limit=limit, offset=offset)
     return TestRunHistoryPage(
@@ -180,9 +219,9 @@ def get_run_summary_endpoint(
     project_id: int,
     run_id: int,
     session: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> TestRunSummaryRead:
-    if get_project(session, project_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    require_project_member(session, project_id, current_user)
 
     summary = get_project_run_summary(session, project_id, run_id)
     if summary is None:
@@ -219,9 +258,9 @@ def get_run_results_endpoint(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> TestResultPage:
-    if get_project(session, project_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    require_project_member(session, project_id, current_user)
     run = get_project_run(session, project_id, run_id)
     if run is None:
         raise HTTPException(

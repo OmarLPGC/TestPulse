@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import sys
 import uuid
 from collections.abc import Callable, Sequence
@@ -73,13 +74,25 @@ def _request_headers(args: argparse.Namespace) -> dict[str, str]:
     headers = {
         "Content-Type": "application/xml",
         "Idempotency-Key": args.idempotency_key or _default_idempotency_key(args.project),
+        "Authorization": f"Bearer {args.token}",
     }
     if args.commit:
         headers["X-Commit-SHA"] = args.commit
     if args.branch:
         headers["X-Branch"] = args.branch
-    if args.token:
-        headers["Authorization"] = f"Bearer {args.token}"
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        headers["X-CI-Source"] = "github-actions"
+        ci_values = {
+            "X-CI-Run-ID": os.environ.get("GITHUB_RUN_ID"),
+            "X-CI-Run-Attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+            "X-CI-Event": os.environ.get("GITHUB_EVENT_NAME"),
+        }
+        for header, value in ci_values.items():
+            if value:
+                headers[header] = value
+        pull_request = re.match(r"^refs/pull/([1-9][0-9]*)/", os.environ.get("GITHUB_REF", ""))
+        if pull_request:
+            headers["X-CI-Pull-Request"] = pull_request.group(1)
     return headers
 
 
@@ -162,6 +175,10 @@ def main(
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.host:
         parser.error("--url must start with http:// or https://.")
     args.url = str(parsed_url)
+    if not args.token:
+        parser.error(
+            "an ingestion token is required; set TESTPULSE_API_TOKEN or pass --token."
+        )
 
     try:
         report_content = args.report.read_bytes()
