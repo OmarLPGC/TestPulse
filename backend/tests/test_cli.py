@@ -4,34 +4,30 @@ from typing import Callable
 
 import httpx
 import pytest
-from database import Base
 from database import TestRun as RunEntity
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
-from testpulse.app import create_app
+from test_support import create_authenticated_test_app
 from testpulse.cli import main
-from testpulse.config import Settings
 
 
 @pytest.fixture
 def api_client(tmp_path: Path) -> Iterator[TestClient]:
-    settings = Settings(
-        app_env="test",
-        database_url=URL.create("sqlite", database=str(tmp_path / "cli.db")),
-    )
-    app = create_app(settings)
-    Base.metadata.create_all(app.state.database_engine)
+    app, _ = create_authenticated_test_app(tmp_path / "cli.db")
     with TestClient(app) as client:
         yield client
 
 
 @pytest.fixture
-def project_id(api_client: TestClient) -> int:
+def project_id(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> int:
     response = api_client.post("/projects", json={"name": "CLI integration"})
     assert response.status_code == 201
-    return response.json()["id"]
+    project_id = response.json()["id"]
+    token_response = api_client.post(f"/api/v1/projects/{project_id}/ingestion-tokens", json={})
+    assert token_response.status_code == 201
+    monkeypatch.setenv("TESTPULSE_API_TOKEN", token_response.json()["token"])
+    return project_id
 
 
 def api_client_factory(
@@ -269,6 +265,7 @@ def test_cli_generates_stable_idempotency_key_for_github_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("GITHUB_REPOSITORY", "example/service")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("GITHUB_RUN_ID", "987654")
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     report_path = tmp_path / "junit.xml"
@@ -309,3 +306,6 @@ def test_cli_generates_stable_idempotency_key_for_github_attempt(
     assert captured_headers[0]["idempotency-key"] == (
         f"github-actions:example/service:987654:2:{project_id}"
     )
+    assert captured_headers[0]["authorization"].startswith("Bearer ")
+    assert captured_headers[0]["x-ci-source"] == "github-actions"
+    assert captured_headers[0]["x-ci-run-id"] == "987654"

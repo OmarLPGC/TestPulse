@@ -3,35 +3,37 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from database import Base
+from database import ProjectIngestionToken
 from database import TestResult as ResultEntity
 from database import TestRun as RunEntity
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
-from testpulse.app import create_app
-from testpulse.config import Settings
+from test_support import create_authenticated_test_app
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
-    settings = Settings(
-        app_env="test",
-        database_url=URL.create("sqlite", database=str(tmp_path / "runs.db")),
+    app, _ = create_authenticated_test_app(
+        tmp_path / "runs.db",
         max_junit_report_bytes=1024,
         max_junit_test_cases=5,
     )
-    app = create_app(settings)
-    Base.metadata.create_all(app.state.database_engine)
     with TestClient(app) as test_client:
+        test_client.app.state.test_ingestion_tokens = {}
         yield test_client
 
 
 def create_project(client: TestClient, name: str = "Ingestion") -> int:
     response = client.post("/projects", json={"name": name})
     assert response.status_code == 201
-    return response.json()["id"]
+    project_id = response.json()["id"]
+    token_response = client.post(f"/api/v1/projects/{project_id}/ingestion-tokens", json={})
+    assert token_response.status_code == 201
+    token = token_response.json()["token"]
+    client.app.state.test_ingestion_tokens[project_id] = token
+    client.headers["Authorization"] = f"Bearer {token}"
+    return project_id
 
 
 def run_counts(client: TestClient, project_id: int) -> tuple[int, int]:
@@ -58,7 +60,11 @@ def upload_run(
     response = client.post(
         f"/api/v1/projects/{project_id}/runs",
         content=report,
-        headers={"Content-Type": "application/xml", "X-Branch": branch},
+        headers={
+            "Authorization": f"Bearer {client.app.state.test_ingestion_tokens[project_id]}",
+            "Content-Type": "application/xml",
+            "X-Branch": branch,
+        },
     )
     assert response.status_code == 201
     return response.json()
@@ -139,6 +145,79 @@ def test_idempotent_retries_return_existing_run(client: TestClient) -> None:
     assert run_counts(client, project_id) == (1, 1)
 
 
+def test_ingestion_tokens_are_project_scoped_hashed_and_revocable(client: TestClient) -> None:
+    project_id = create_project(client)
+    other_project_id = create_project(client, "Other ingestion project")
+    token = client.app.state.test_ingestion_tokens[project_id]
+    with Session(client.app.state.database_engine) as session:
+        token_hash = session.scalar(
+            select(ProjectIngestionToken.token_hash).where(
+                ProjectIngestionToken.project_id == project_id
+            )
+        )
+    assert token_hash != token
+
+    other_project_response = client.post(
+        f"/api/v1/projects/{other_project_id}/runs",
+        content='<testsuite><testcase name="wrong-project"/></testsuite>',
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/xml"},
+    )
+    assert other_project_response.status_code == 401
+    assert run_counts(client, other_project_id) == (0, 0)
+
+    listed = client.get(f"/api/v1/projects/{project_id}/ingestion-tokens")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    assert "token" not in listed.json()[0]
+
+    token_id = listed.json()[0]["id"]
+    revoked = client.delete(f"/api/v1/projects/{project_id}/ingestion-tokens/{token_id}")
+    assert revoked.status_code == 204
+    response = client.post(
+        f"/api/v1/projects/{project_id}/runs",
+        content='<testsuite><testcase name="revoked"/></testsuite>',
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/xml"},
+    )
+    assert response.status_code == 401
+    assert run_counts(client, project_id) == (0, 0)
+
+
+def test_ci_metadata_is_persisted_and_part_of_idempotency_fingerprint(
+    client: TestClient,
+) -> None:
+    project_id = create_project(client)
+    token = client.app.state.test_ingestion_tokens[project_id]
+    report = '<testsuite><testcase name="ci-metadata"/></testsuite>'
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/xml",
+        "Idempotency-Key": "ci-run-key",
+        "X-CI-Source": "github-actions",
+        "X-CI-Run-ID": "987654",
+        "X-CI-Run-Attempt": "2",
+        "X-CI-Event": "pull_request",
+        "X-CI-Pull-Request": "17",
+    }
+
+    created = client.post(f"/api/v1/projects/{project_id}/runs", content=report, headers=headers)
+    repeated = client.post(f"/api/v1/projects/{project_id}/runs", content=report, headers=headers)
+    changed_metadata = client.post(
+        f"/api/v1/projects/{project_id}/runs",
+        content=report,
+        headers={**headers, "X-CI-Pull-Request": "18"},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["ci_source"] == "github-actions"
+    assert created.json()["ci_run_id"] == "987654"
+    assert created.json()["ci_run_attempt"] == "2"
+    assert created.json()["ci_event"] == "pull_request"
+    assert created.json()["ci_pull_request"] == "17"
+    assert repeated.status_code == 200
+    assert changed_metadata.status_code == 409
+    assert run_counts(client, project_id) == (1, 1)
+
+
 @pytest.mark.parametrize(
     ("report", "headers"),
     [
@@ -204,14 +283,14 @@ def test_oversized_report_returns_413(client: TestClient) -> None:
     assert run_counts(client, project_id) == (0, 0)
 
 
-def test_unknown_project_returns_404(client: TestClient) -> None:
+def test_unknown_project_without_token_is_rejected(client: TestClient) -> None:
     response = client.post(
         "/api/v1/projects/999999/runs",
         content="<testsuite/>",
         headers={"Content-Type": "application/xml"},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
 def test_empty_report_is_persisted_with_empty_status(client: TestClient) -> None:

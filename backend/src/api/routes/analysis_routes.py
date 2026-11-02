@@ -1,10 +1,10 @@
 from typing import Optional
 
-from database.db_operations.projects import get_project
 from database.db_operations.runs import (
     get_project_test_observations,
     get_run_regression_results,
 )
+from database.schemas.user_entity import User
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from testpulse.analysis import (
@@ -14,7 +14,8 @@ from testpulse.analysis import (
     detect_regressions,
 )
 
-from api.routes.project_routes import get_db_session
+from api.authz import require_project_member
+from api.dependencies import get_current_user, get_db_session
 from api.schemas.analysis_schemas import (
     RegressionRead,
     RunRegressionReport,
@@ -36,9 +37,9 @@ def get_test_reliability_endpoint(
     branch: Optional[str] = None,
     window_size: int = Query(default=DEFAULT_WINDOW_SIZE, ge=1, le=MAX_WINDOW_SIZE),
     session: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> TestReliabilityReport:
-    if get_project(session, project_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    require_project_member(session, project_id, current_user)
 
     observations = get_project_test_observations(
         session,
@@ -81,9 +82,9 @@ def get_run_regressions_endpoint(
     project_id: int,
     run_id: int,
     session: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user),
 ) -> RunRegressionReport:
-    if get_project(session, project_id) is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
+    require_project_member(session, project_id, current_user)
     run_data = get_run_regression_results(session, project_id, run_id)
     if run_data is None:
         raise HTTPException(

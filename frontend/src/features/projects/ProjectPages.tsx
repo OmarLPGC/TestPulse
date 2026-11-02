@@ -1,34 +1,39 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes, useLocation, useParams } from "react-router-dom";
 
-import { getProjects, getRunHistory, type Project } from "../../api";
+import { getRunHistory, type Project } from "../../api";
+import { useAuth } from "../../auth/AuthContext";
 import { EmptyState, ErrorState, Icon, LoadingState, NotFound, PulseMark } from "../../components/ui";
 import { ReliabilityPage } from "../reliability/ReliabilityPage";
 import { RunDetailPage, RunsPage } from "../runs/RunPages";
+import { CreateProjectPage } from "../workspaces/CreateProjectPage";
+import { useWorkspaces } from "../workspaces/WorkspaceContext";
+import { ProjectSettingsPage } from "./ProjectSettingsPage";
 
 export function Dashboard() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [projectState, setProjectState] = useState<"loading" | "ready" | "error">("loading");
-  const [projectError, setProjectError] = useState("");
-  const [retry, setRetry] = useState(0);
+  const { session, signOut } = useAuth();
+  const {
+    activeWorkspace,
+    projects,
+    projectsState,
+    projectsError,
+    refreshProjects,
+    setActiveWorkspaceId,
+    workspaceError,
+    workspaceState,
+    workspaces,
+    retryWorkspaces,
+  } = useWorkspaces();
+  const [signOutError, setSignOutError] = useState("");
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setProjectState("loading");
-    getProjects(controller.signal)
-      .then((items) => {
-        setProjects(items);
-        setProjectState("ready");
-      })
-      .catch((error: unknown) => {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
-        setProjectError(error instanceof Error ? error.message : "Could not load projects.");
-        setProjectState("error");
-      });
-    return () => controller.abort();
-  }, [retry]);
+  async function handleSignOut() {
+    setSignOutError("");
+    try {
+      await signOut();
+    } catch (error) {
+      setSignOutError(error instanceof Error ? error.message : "Could not sign out.");
+    }
+  }
 
   return (
     <div className="app-shell">
@@ -37,6 +42,32 @@ export function Dashboard() {
           <PulseMark />
           <span>testpulse</span>
         </Link>
+
+        <div className="workspace-switcher">
+          <label htmlFor="active-workspace">Workspace</label>
+          {workspaceState === "loading" && <span className="sidebar-note">Loading…</span>}
+          {workspaceState === "ready" && workspaces.length === 0 && (
+            <span className="sidebar-note">No workspaces available</span>
+          )}
+          {workspaceState === "ready" && workspaces.length > 0 && (
+            <>
+              <select
+                aria-label="Active workspace"
+                id="active-workspace"
+                onChange={(event) => setActiveWorkspaceId(Number(event.target.value))}
+                value={activeWorkspace?.id ?? ""}
+              >
+                {workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                ))}
+              </select>
+              {activeWorkspace && <span className="workspace-role">{activeWorkspace.role}</span>}
+            </>
+          )}
+          {workspaceState === "error" && (
+            <span className="sidebar-note" role="status">{workspaceError}</span>
+          )}
+        </div>
 
         <nav aria-label="Main navigation" className="side-navigation">
           <NavLink className={({ isActive }) => navClass(isActive)} end to="/">
@@ -48,13 +79,13 @@ export function Dashboard() {
 
         <div className="sidebar-section">
           <p className="sidebar-heading">Your projects</p>
-          {projectState === "loading" && <span className="sidebar-note">Loading projects…</span>}
-          {projectState === "error" && (
+          {projectsState === "loading" && <span className="sidebar-note">Loading projects…</span>}
+          {projectsState === "error" && (
             <span className="sidebar-note" role="status">
               Project list unavailable
             </span>
           )}
-          {projectState === "ready" && projects.length === 0 && (
+          {projectsState === "ready" && projects.length === 0 && (
             <span className="sidebar-note">No projects yet</span>
           )}
           {projects.map((project) => (
@@ -71,20 +102,40 @@ export function Dashboard() {
         </div>
 
         <div className="sidebar-footer">
-          <span className="connection-indicator" />
-          <span>Test history, in focus.</span>
+          {session.status === "authenticated" && (
+            <>
+              {session.user.avatar_url && (
+                <img alt="" className="user-avatar" src={session.user.avatar_url} />
+              )}
+              <span className="user-login">{session.user.name || session.user.login}</span>
+            </>
+          )}
+          <button
+            className="text-button sign-out-button"
+            onClick={() => void handleSignOut()}
+            type="button"
+          >
+            Sign out
+          </button>
         </div>
+        {signOutError && <p className="sidebar-error" role="alert">{signOutError}</p>}
       </aside>
 
       <main className="main-panel">
+        {workspaceState === "error" ? (
+          <div className="page-container">
+            <ErrorState message={workspaceError} onRetry={retryWorkspaces} />
+          </div>
+        ) : (
         <Routes>
+          <Route element={<CreateProjectPage />} path="/projects/new" />
           <Route
             element={
               <ProjectsPage
-                error={projectError}
-                onRetry={() => setRetry((value) => value + 1)}
+                error={projectsError}
+                onRetry={refreshProjects}
                 projects={projects}
-                state={projectState}
+                state={projectsState}
               />
             }
             path="/"
@@ -92,8 +143,8 @@ export function Dashboard() {
           <Route
             element={
               <ProjectWorkspace
-                onRetryProjects={() => setRetry((value) => value + 1)}
-                projectState={projectState}
+                onRetryProjects={refreshProjects}
+                projectState={projectsState}
                 projects={projects}
               />
             }
@@ -101,6 +152,7 @@ export function Dashboard() {
           />
           <Route element={<NotFound />} path="*" />
         </Routes>
+        )}
       </main>
     </div>
   );
@@ -121,6 +173,8 @@ function ProjectsPage({
   error: string;
   onRetry: () => void;
 }) {
+  const { activeWorkspace } = useWorkspaces();
+
   return (
     <div className="page-container projects-page">
       <div className="page-topline">
@@ -132,15 +186,28 @@ function ProjectsPage({
           <h1>Projects</h1>
           <p>Choose a project to explore its test history and reliability.</p>
         </div>
-        {state === "ready" && <span className="heading-count">{projects.length} projects</span>}
+        <div className="projects-heading-actions">
+          {state === "ready" && <span className="heading-count">{projects.length} projects</span>}
+          {activeWorkspace?.role === "owner" ? (
+            <Link className="primary-button" to="/projects/new">Connect project</Link>
+          ) : (
+            <span className="role-explanation">Workspace members can view projects; owners connect them.</span>
+          )}
+        </div>
       </header>
 
       {state === "loading" && <LoadingState label="Loading your projects" />}
       {state === "error" && <ErrorState message={error} onRetry={onRetry} />}
-      {state === "ready" && projects.length === 0 && (
+      {state === "ready" && !activeWorkspace && (
+        <EmptyState
+          title="No workspaces available"
+          description="You need to belong to a workspace before you can view projects."
+        />
+      )}
+      {state === "ready" && activeWorkspace && projects.length === 0 && (
         <EmptyState
           title="No projects yet"
-          description="Projects appear here after the first one is registered with the TestPulse API."
+          description="Connect a GitHub repository or create a project without one to start building test history."
         />
       )}
       {state === "ready" && projects.length > 0 && (
@@ -292,6 +359,12 @@ function ProjectWorkspace({
           <Icon name="stability" />
           Reliability
         </NavLink>
+        <NavLink
+          className={({ isActive }) => `project-tab${isActive ? " active" : ""}`}
+          to={`/project/${projectId}/settings`}
+        >
+          CI setup
+        </NavLink>
       </nav>
 
       <Routes>
@@ -301,9 +374,9 @@ function ProjectWorkspace({
           element={<ReliabilityPage branch={branch} projectId={projectId} />}
           path="reliability"
         />
+        <Route element={<ProjectSettingsPage projectId={projectId} />} path="settings" />
         <Route element={<NotFound />} path="*" />
       </Routes>
     </div>
   );
 }
-

@@ -5,33 +5,32 @@ from typing import Optional
 
 import pytest
 from database import AnalysisJob as AnalysisJobEntity
-from database import AnalysisJobStatus, Base
+from database import AnalysisJobStatus
 from database import TestRun as RunEntity
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
+from test_support import create_authenticated_test_app
 from testpulse.analysis_worker import process_next_analysis_job
-from testpulse.app import create_app
-from testpulse.config import Settings
 
 
 @pytest.fixture
 def client(tmp_path: Path) -> Iterator[TestClient]:
-    settings = Settings(
-        app_env="test",
-        database_url=URL.create("sqlite", database=str(tmp_path / "analysis-jobs.db")),
-    )
-    app = create_app(settings)
-    Base.metadata.create_all(app.state.database_engine)
+    app, _ = create_authenticated_test_app(tmp_path / "analysis-jobs.db")
     with TestClient(app) as test_client:
+        test_client.app.state.test_ingestion_tokens = {}
         yield test_client
 
 
 def create_project(client: TestClient) -> int:
     response = client.post("/projects", json={"name": "Analysis jobs"})
     assert response.status_code == 201
-    return response.json()["id"]
+    project_id = response.json()["id"]
+    token_response = client.post(f"/api/v1/projects/{project_id}/ingestion-tokens", json={})
+    assert token_response.status_code == 201
+    client.app.state.test_ingestion_tokens[project_id] = token_response.json()["token"]
+    return project_id
 
 
 def upload_run(
@@ -57,6 +56,7 @@ def upload_run(
             "</testsuite>"
         ),
         headers={
+            "Authorization": (f"Bearer {client.app.state.test_ingestion_tokens[project_id]}"),
             "Content-Type": "application/xml",
             "X-Branch": branch,
             **({"Idempotency-Key": idempotency_key} if idempotency_key else {}),
@@ -217,7 +217,10 @@ def test_invalid_report_does_not_create_run_or_analysis_job(client: TestClient) 
     response = client.post(
         f"/api/v1/projects/{project_id}/runs",
         content="<testsuite><testcase",
-        headers={"Content-Type": "application/xml"},
+        headers={
+            "Authorization": f"Bearer {client.app.state.test_ingestion_tokens[project_id]}",
+            "Content-Type": "application/xml",
+        },
     )
     assert response.status_code == 422
 
@@ -239,7 +242,11 @@ def test_empty_run_analysis_completes_with_empty_snapshot(client: TestClient) ->
     response = client.post(
         f"/api/v1/projects/{project_id}/runs",
         content="<testsuite/>",
-        headers={"Content-Type": "application/xml", "X-Branch": "main"},
+        headers={
+            "Authorization": f"Bearer {client.app.state.test_ingestion_tokens[project_id]}",
+            "Content-Type": "application/xml",
+            "X-Branch": "main",
+        },
     )
     assert response.status_code == 201
     run = response.json()
@@ -288,6 +295,7 @@ def test_idempotent_ingestion_does_not_create_another_job(client: TestClient) ->
         headers={
             "Content-Type": "application/xml",
             "X-Branch": "main",
+            "Authorization": f"Bearer {client.app.state.test_ingestion_tokens[project_id]}",
             "Idempotency-Key": "same-report",
         },
     )

@@ -23,6 +23,11 @@ class TestRunRead(BaseModel):
     project_id: int
     commit_sha: Optional[str]
     branch: Optional[str]
+    ci_source: Optional[str] = None
+    ci_run_id: Optional[str] = None
+    ci_run_attempt: Optional[str] = None
+    ci_event: Optional[str] = None
+    ci_pull_request: Optional[str] = None
     report_sha: str
     status: TestRunStatus
     duration: Optional[int]
@@ -36,6 +41,11 @@ class TestRunHistoryItem(BaseModel):
     project_id: int
     commit_sha: Optional[str]
     branch: Optional[str]
+    ci_source: Optional[str] = None
+    ci_run_id: Optional[str] = None
+    ci_run_attempt: Optional[str] = None
+    ci_event: Optional[str] = None
+    ci_pull_request: Optional[str] = None
     report_sha: Optional[str]
     status: TestRunStatus
     duration: Optional[int]
