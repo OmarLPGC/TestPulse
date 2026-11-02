@@ -11,6 +11,12 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         "/api": apiTarget,
+        "/projects": {
+          target: apiTarget,
+          bypass: (request) => {
+            if (request.url?.split("?")[0] !== "/projects") return request.url;
+          },
+        },
       },
     },
     test: {

@@ -45,3 +45,52 @@ es una lista vacía. La salida se ordena por clase, nombre e ID para que sea rep
 Ambos endpoints devuelven `404` para proyectos inexistentes; el endpoint de regresiones también
 devuelve `404` si la ejecución no existe en el proyecto indicado. Un `window_size` fuera del rango
 admitido devuelve `422`.
+
+## English
+
+# Analysis engine
+
+The analysis engine lives in `testpulse.analysis` and operates on typed observations; it does not
+depend on FastAPI or SQLAlchemy. Database queries select the history or run pair and convert their
+rows into these observations. Deterministic functions then apply the rules.
+
+## Reliability and flakiness
+
+For each test, the engine considers the most recent valid observations from the requested branch.
+The order is `ingested_at` descending, with run ID descending to break ties. `skipped` results are
+excluded before selecting the window and do not increase the observation count. `passed` counts
+as a success; `failed` and `error` count as failures.
+
+The default window size is 20 (the endpoint accepts 1 to 100). At least 5 valid observations are
+required to classify reliability:
+
+- `insufficient_data`: fewer than 5 valid observations.
+- `stable`: at least 5 observations, all `passed`.
+- `persistently_failing`: at least 5 observations, all `failed` or `error`.
+- `potentially_flaky`: at least 5 observations, with both `passed` and `failed`/`error`.
+
+The failure rate is `(number of failed + number of error) / number of valid observations`,
+rounded to four decimal places. The response keeps the `failed` and `errors` counters separate.
+This rule identifies observed alternation; it does not infer a root cause or apply a probabilistic
+model.
+
+## Regressions
+
+The comparison uses the chronologically previous run for the same branch and project, ordered by
+`ingested_at` descending with ID as the tie-breaker. A test is reported as a regression only if it
+appears in both runs, its previous result was `passed`, and its current result is `failed` or
+`error`. Persistent failures, new tests, and tests that were previously skipped are not classified
+as regressions. If there is no previous run on that branch (or no branch was provided), the result
+is an empty list. The output is sorted by class, name, and ID for reproducibility.
+
+## Endpoints
+
+- `GET /api/v1/projects/{project_id}/analysis/reliability?branch=main&window_size=20` returns
+  reliability analysis per test. The branch is optional; without it, histories from all project
+  branches are considered.
+- `GET /api/v1/projects/{project_id}/runs/{run_id}/regressions` returns the branch, the previous
+  run used for comparison, and the regressions (which may be an empty list).
+
+Both endpoints return `404` for nonexistent projects; the regression endpoint also returns `404`
+if the run does not exist in the specified project. A `window_size` outside the allowed range
+returns `422`.
