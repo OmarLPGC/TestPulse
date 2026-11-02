@@ -101,10 +101,91 @@ export interface RegressionReport {
   regressions: Regression[];
 }
 
-async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
+export interface AuthenticatedUser {
+  id: number;
+  login: string;
+  name: string | null;
+  avatar_url: string | null;
+}
+
+export interface Workspace {
+  id: number;
+  name: string;
+  role: "owner" | "member";
+}
+
+export interface GitHubRepository {
+  id: number;
+  full_name: string;
+  html_url: string;
+  private: boolean;
+  default_branch: string | null;
+}
+
+export interface GitHubRepositoryPage {
+  items: GitHubRepository[];
+  page: number;
+  per_page: number;
+  has_more: boolean;
+}
+
+export interface IngestionToken {
+  id: number;
+  name: string;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface CreatedIngestionToken extends IngestionToken {
+  token: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("TestPulse returned an invalid response.");
+  }
+  return value as Record<string, unknown>;
+}
+
+function nullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function parseProject(value: unknown): Project {
+  const project = record(value);
+  const { id, name, repository_url, created_at, updated_at } = project;
+  if (
+    typeof id !== "number" ||
+    !Number.isInteger(id) ||
+    typeof name !== "string" ||
+    !nullableString(repository_url) ||
+    typeof created_at !== "string" ||
+    typeof updated_at !== "string"
+  ) {
+    throw new Error("TestPulse returned an invalid project.");
+  }
+  return { id, name, repository_url, created_at, updated_at };
+}
+
+async function requestJson<T>(
+  path: string,
+  signal?: AbortSignal,
+  init: RequestInit = {},
+): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, { signal });
+    response = await fetch(path, { ...init, credentials: "include", signal });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
@@ -129,7 +210,18 @@ async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
         throw error;
       }
     }
-    throw new Error(detail);
+    if (
+      response.status === 401 &&
+      path !== "/api/v1/auth/me" &&
+      typeof window !== "undefined"
+    ) {
+      window.dispatchEvent(new Event("testpulse:session-expired"));
+    }
+    throw new ApiError(detail, response.status);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   try {
@@ -142,8 +234,174 @@ async function requestJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   }
 }
 
-export function getProjects(signal?: AbortSignal): Promise<Project[]> {
-  return requestJson<Project[]>("/projects", signal);
+export function getCurrentUser(signal?: AbortSignal): Promise<AuthenticatedUser> {
+  return requestJson<unknown>("/api/v1/auth/me", signal).then((value) => {
+    const user = record(value);
+    const { id, login, name, avatar_url } = user;
+    if (
+      typeof id !== "number" ||
+      !Number.isInteger(id) ||
+      typeof login !== "string" ||
+      !nullableString(name) ||
+      !nullableString(avatar_url)
+    ) {
+      throw new Error("TestPulse returned an invalid user session.");
+    }
+    return { id, login, name, avatar_url };
+  });
+}
+
+export function getGitHubLoginUrl(): string {
+  return "/api/v1/auth/github/login";
+}
+
+export function logout(): Promise<void> {
+  return requestJson<void>("/api/v1/auth/logout", undefined, { method: "POST" });
+}
+
+export function getWorkspaces(signal?: AbortSignal): Promise<Workspace[]> {
+  return requestJson<unknown>("/api/v1/workspaces", signal).then((value) => {
+    if (!Array.isArray(value)) throw new Error("TestPulse returned an invalid workspace list.");
+    return value.map((item) => {
+      const workspace = record(item);
+      const { id, name, role } = workspace;
+      if (
+        typeof id !== "number" ||
+        !Number.isInteger(id) ||
+        typeof name !== "string" ||
+        (role !== "owner" && role !== "member")
+      ) {
+        throw new Error("TestPulse returned an invalid workspace.");
+      }
+      return { id, name, role };
+    });
+  });
+}
+
+export function getWorkspaceProjects(
+  workspaceId: number,
+  signal?: AbortSignal,
+): Promise<Project[]> {
+  return requestJson<unknown>(`/api/v1/workspaces/${workspaceId}/projects`, signal).then((value) => {
+    if (!Array.isArray(value)) throw new Error("TestPulse returned an invalid project list.");
+    return value.map(parseProject);
+  });
+}
+
+export function getGitHubRepositories(
+  page: number,
+  perPage: number,
+  signal?: AbortSignal,
+): Promise<GitHubRepositoryPage> {
+  const parameters = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+  });
+  return requestJson<unknown>(
+    `/api/v1/github/repositories?${parameters.toString()}`,
+    signal,
+  ).then((value) => {
+    const pageData = record(value);
+    const pageNumber = pageData.page;
+    const perPage = pageData.per_page;
+    const hasMore = pageData.has_more;
+    if (
+      !Array.isArray(pageData.items) ||
+      typeof pageNumber !== "number" ||
+      !Number.isInteger(pageNumber) ||
+      typeof perPage !== "number" ||
+      !Number.isInteger(perPage) ||
+      typeof hasMore !== "boolean"
+    ) {
+      throw new Error("TestPulse returned an invalid repository page.");
+    }
+    const items = pageData.items.map((item) => {
+      const repository = record(item);
+      const { id, full_name, html_url, private: isPrivate, default_branch } = repository;
+      if (
+        typeof id !== "number" ||
+        !Number.isInteger(id) ||
+        typeof full_name !== "string" ||
+        typeof html_url !== "string" ||
+        typeof isPrivate !== "boolean" ||
+        !nullableString(default_branch)
+      ) {
+        throw new Error("TestPulse returned an invalid GitHub repository.");
+      }
+      return { id, full_name, html_url, private: isPrivate, default_branch };
+    });
+    return { items, page: pageNumber, per_page: perPage, has_more: hasMore };
+  });
+}
+
+export function createWorkspaceProject(
+  workspaceId: number,
+  input: { name: string; repository_id?: number; repository_url?: string },
+): Promise<Project> {
+  return requestJson<unknown>(`/api/v1/workspaces/${workspaceId}/projects`, undefined, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  }).then(parseProject);
+}
+
+export function getIngestionTokens(
+  projectId: number,
+  signal?: AbortSignal,
+): Promise<IngestionToken[]> {
+  return requestJson<unknown>(
+    `/api/v1/projects/${projectId}/ingestion-tokens`,
+    signal,
+  ).then(parseIngestionTokens);
+}
+
+export function createIngestionToken(
+  projectId: number,
+  name: string,
+): Promise<CreatedIngestionToken> {
+  return requestJson<unknown>(
+    `/api/v1/projects/${projectId}/ingestion-tokens`,
+    undefined,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    },
+  ).then((value) => {
+    const [token] = parseIngestionTokens([value]);
+    const created = record(value);
+    if (typeof created.token !== "string" || !created.token) {
+      throw new Error("TestPulse did not return the new token secret.");
+    }
+    return { ...token, token: created.token };
+  });
+}
+
+function parseIngestionTokens(value: unknown): IngestionToken[] {
+  if (!Array.isArray(value)) throw new Error("TestPulse returned an invalid token list.");
+  return value.map((item) => {
+    const token = record(item);
+    const { id, name, created_at, expires_at, revoked_at } = token;
+    if (
+      typeof id !== "number" ||
+      !Number.isInteger(id) ||
+      typeof name !== "string" ||
+      typeof created_at !== "string" ||
+      !nullableString(expires_at) ||
+      !nullableString(revoked_at)
+    ) {
+      throw new Error("TestPulse returned an invalid ingestion token.");
+    }
+    return { id, name, created_at, expires_at, revoked_at };
+  });
+}
+
+export function revokeIngestionToken(projectId: number, tokenId: number): Promise<void> {
+  return requestJson<void>(
+    `/api/v1/projects/${projectId}/ingestion-tokens/${tokenId}`,
+    undefined,
+    { method: "DELETE" },
+  );
 }
 
 export function getRunHistory(
