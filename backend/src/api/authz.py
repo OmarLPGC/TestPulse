@@ -20,9 +20,7 @@ def has_workspace_membership(session: Session, workspace_id: int, user_id: int) 
 
 def require_project_member(session: Session, project_id: int, user: User) -> Project:
     project = session.get(Project, project_id)
-    if project is None or not has_workspace_membership(
-        session, project.workspace_id, user.id
-    ):
+    if project is None or not has_workspace_membership(session, project.workspace_id, user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found.")
     return project
 

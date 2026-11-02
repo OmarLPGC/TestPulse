@@ -56,9 +56,7 @@ def upload_run(
             "</testsuite>"
         ),
         headers={
-            "Authorization": (
-                f"Bearer {client.app.state.test_ingestion_tokens[project_id]}"
-            ),
+            "Authorization": (f"Bearer {client.app.state.test_ingestion_tokens[project_id]}"),
             "Content-Type": "application/xml",
             "X-Branch": branch,
             **({"Idempotency-Key": idempotency_key} if idempotency_key else {}),

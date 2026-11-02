@@ -105,10 +105,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("token_hash", name=op.f("pk_user_sessions")),
     )
     op.execute(
-        sa.text(
-            "INSERT INTO workspaces (name, is_legacy) "
-            "VALUES ('Legacy workspace', TRUE)"
-        )
+        sa.text("INSERT INTO workspaces (name, is_legacy) VALUES ('Legacy workspace', TRUE)")
     )
     op.add_column("projects", sa.Column("workspace_id", sa.Integer(), nullable=True))
     op.execute(

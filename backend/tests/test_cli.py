@@ -20,15 +20,11 @@ def api_client(tmp_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def project_id(
-    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> int:
+def project_id(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> int:
     response = api_client.post("/projects", json={"name": "CLI integration"})
     assert response.status_code == 201
     project_id = response.json()["id"]
-    token_response = api_client.post(
-        f"/api/v1/projects/{project_id}/ingestion-tokens", json={}
-    )
+    token_response = api_client.post(f"/api/v1/projects/{project_id}/ingestion-tokens", json={})
     assert token_response.status_code == 201
     monkeypatch.setenv("TESTPULSE_API_TOKEN", token_response.json()["token"])
     return project_id

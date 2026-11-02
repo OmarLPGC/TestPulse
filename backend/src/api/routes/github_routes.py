@@ -34,9 +34,7 @@ def list_github_repositories(
             access_token, page=page, per_page=per_page
         )
     except GitHubError as error:
-        raise _github_http_error(
-            error, "GitHub repositories could not be loaded."
-        ) from error
+        raise _github_http_error(error, "GitHub repositories could not be loaded.") from error
     return RepositoryPage(
         items=[RepositoryRead(**repository) for repository in repositories],
         page=page,

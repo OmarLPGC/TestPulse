@@ -39,9 +39,7 @@ def create_authenticated_test_app(
         workspace = Workspace(name="Test workspace", is_personal=True)
         session.add_all((user, workspace))
         session.flush()
-        session.add(
-            WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role="owner")
-        )
+        session.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role="owner"))
         session.commit()
         session.refresh(user)
         session.expunge(user)

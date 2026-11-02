@@ -188,9 +188,7 @@ def claim_legacy_workspace(
             (item for item in memberships if item.user_id == current_user.id), None
         )
         if own_membership and own_membership.role == "owner":
-            return WorkspaceRead(
-                id=workspace.id, name=workspace.name, role="owner", is_legacy=True
-            )
+            return WorkspaceRead(id=workspace.id, name=workspace.name, role="owner", is_legacy=True)
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="The legacy workspace has already been claimed.",

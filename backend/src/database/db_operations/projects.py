@@ -32,8 +32,8 @@ def create_project(
             session.flush()
     except IntegrityError as error:
         constraint_name = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
-        sqlite_duplicate = (
-            "UNIQUE constraint failed: projects.workspace_id, projects.name" in str(error.orig)
+        sqlite_duplicate = "UNIQUE constraint failed: projects.workspace_id, projects.name" in str(
+            error.orig
         )
         if constraint_name == "uq_projects_workspace_name" or sqlite_duplicate:
             raise ProjectNameConflict(name) from error

@@ -176,9 +176,7 @@ def main(
         parser.error("--url must start with http:// or https://.")
     args.url = str(parsed_url)
     if not args.token:
-        parser.error(
-            "an ingestion token is required; set TESTPULSE_API_TOKEN or pass --token."
-        )
+        parser.error("an ingestion token is required; set TESTPULSE_API_TOKEN or pass --token.")
 
     try:
         report_content = args.report.read_bytes()
