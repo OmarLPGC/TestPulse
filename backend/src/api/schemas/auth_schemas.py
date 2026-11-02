@@ -68,7 +68,17 @@ class RepositoryConnect(BaseModel):
 
 
 class IngestionTokenCreate(BaseModel):
+    name: str = Field(default="Ingestion token", min_length=1, max_length=100)
     expires_at: Optional[datetime] = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("Token name must not be empty or whitespace.")
+        return value
 
 
 class IngestionTokenRead(BaseModel):
@@ -76,6 +86,7 @@ class IngestionTokenRead(BaseModel):
 
     id: int
     project_id: int
+    name: str
     created_at: datetime
     expires_at: Optional[datetime]
     revoked_at: Optional[datetime]

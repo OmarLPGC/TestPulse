@@ -40,11 +40,12 @@ def create_project_ingestion_token(
                 detail="expires_at must be a future timezone-aware timestamp.",
             )
     record, raw_token = create_ingestion_token(
-        session, project_id, token_data.expires_at
+        session, project_id, token_data.name, token_data.expires_at
     )
     return IngestionTokenCreated(
         id=record.id,
         project_id=record.project_id,
+        name=record.name,
         created_at=record.created_at,
         expires_at=record.expires_at,
         revoked_at=record.revoked_at,

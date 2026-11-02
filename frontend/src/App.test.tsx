@@ -8,6 +8,7 @@ import { workflowYaml } from "./features/projects/ProjectSettingsPage";
 
 const project = {
   id: 1,
+  workspace_id: 1,
   name: "Signal API",
   repository_url: "https://github.com/example/signal-api",
   created_at: "2025-01-01T10:00:00Z",
@@ -63,14 +64,22 @@ function mockFetch(
     const url = new URL(String(input), "http://localhost");
     const result = await handler(url, init);
     if (options.authenticated !== false && url.pathname === "/api/v1/auth/me") {
-      return response(options.user ?? authenticatedUser);
+      const user = options.user ?? authenticatedUser;
+      return response({
+        id: user.id,
+        github_user_id: 123456,
+        github_login: user.login,
+        display_name: user.name,
+        avatar_url: user.avatar_url,
+        csrf_token: "test-csrf-token",
+      });
     }
     if (options.authenticated !== false && url.pathname === "/api/v1/workspaces") {
       return response(options.workspaces ?? [defaultWorkspace]);
     }
     if (
       options.authenticated !== false &&
-      url.pathname.match(/^\/api\/v1\/workspaces\/\d+\/projects$/) &&
+      url.pathname === "/projects" &&
       init?.method !== "POST"
     ) {
       if (!result.ok) return result;
@@ -85,7 +94,7 @@ function mockFetch(
 
 beforeEach(() => {
   mockFetch((url) => {
-    if (url.pathname === "/api/v1/workspaces/1/projects") {
+    if (url.pathname === "/projects") {
       return response([project]);
     }
     if (url.pathname.endsWith("/runs/7")) {
@@ -107,6 +116,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  document.cookie = "testpulse_csrf=; Max-Age=0; path=/";
   vi.unstubAllGlobals();
 });
 
@@ -131,6 +141,7 @@ describe("TestPulse dashboard", () => {
   });
 
   it("signs out through the session endpoint", async () => {
+    document.cookie = "testpulse_csrf=test-csrf-token; path=/";
     const fetchMock = mockFetch((url) =>
       url.pathname === "/api/v1/auth/logout" ? response({}, 204) : response({}),
     );
@@ -143,14 +154,15 @@ describe("TestPulse dashboard", () => {
         ([input, init]) =>
           String(input) === "/api/v1/auth/logout" &&
           init?.method === "POST" &&
-          init.credentials === "include",
+          init.credentials === "include" &&
+          new Headers(init.headers).get("X-CSRF-Token") === "test-csrf-token",
       ),
     ).toBe(true);
   });
 
   it("returns to sign-in when a protected API request reports an expired session", async () => {
     mockFetch((url) =>
-      url.pathname === "/api/v1/workspaces/1/projects"
+      url.pathname === "/projects"
         ? response({ detail: "Session expired." }, 401)
         : response({}),
     );
@@ -164,8 +176,8 @@ describe("TestPulse dashboard", () => {
     const secondWorkspace = { id: 2, name: "Research", role: "member" as const };
     const fetchMock = mockFetch(
       (url) => {
-        if (url.pathname === "/api/v1/workspaces/2/projects") {
-          return response([{ ...project, id: 2, name: "Model tests" }]);
+        if (url.pathname === "/projects") {
+          return response([{ ...project, id: 2, workspace_id: 2, name: "Model tests" }]);
         }
         return response({});
       },
@@ -180,14 +192,14 @@ describe("TestPulse dashboard", () => {
     expect(await screen.findAllByRole("link", { name: /Model tests/ })).toHaveLength(2);
     expect(screen.queryByRole("link", { name: "Connect project" })).not.toBeInTheDocument();
     expect(
-      fetchMock.mock.calls.some(([input]) => String(input) === "/api/v1/workspaces/2/projects"),
+      fetchMock.mock.calls.some(([input]) => String(input) === "/projects"),
     ).toBe(true);
   });
 
   it("shows a clear empty state when GitHub has no accessible repositories", async () => {
     mockFetch((url) =>
       url.pathname === "/api/v1/github/repositories"
-        ? response({ items: [], page: 1, per_page: 25, has_more: false })
+        ? response({ items: [], page: 1, per_page: 25, has_next: false })
         : response({}),
     );
     renderAt("/projects/new");
@@ -207,12 +219,12 @@ describe("TestPulse dashboard", () => {
                 full_name: url.searchParams.get("page") === "2" ? "org/second" : "org/first",
                 html_url: "https://github.com/org/repository",
                 private: true,
-                default_branch: "main",
+                permissions: { pull: true, push: true },
               },
             ],
             page: Number(url.searchParams.get("page")),
             per_page: 25,
-            has_more: url.searchParams.get("page") === "1",
+            has_next: url.searchParams.get("page") === "1",
           })
         : response({}),
     );
@@ -238,11 +250,11 @@ describe("TestPulse dashboard", () => {
       repository_url: null,
     };
     const fetchMock = mockFetch((url, init) => {
-      if (url.pathname === "/api/v1/workspaces/1/projects" && init?.method === "POST") {
+      if (url.pathname === "/projects" && init?.method === "POST") {
         created = true;
         return response(newProject);
       }
-      if (url.pathname === "/api/v1/workspaces/1/projects") {
+      if (url.pathname === "/projects") {
         return response(created ? [newProject] : [project]);
       }
       if (url.pathname.endsWith("/runs")) return response(page());
@@ -259,10 +271,14 @@ describe("TestPulse dashboard", () => {
     await waitFor(() => {
       const request = fetchMock.mock.calls.find(
         ([input, init]) =>
-          String(input) === "/api/v1/workspaces/1/projects" && init?.method === "POST",
+          String(input) === "/projects" && init?.method === "POST",
       );
       expect(request).toBeDefined();
-      expect(JSON.parse(String(request?.[1]?.body))).toEqual({ name: "Local test suite" });
+      expect(JSON.parse(String(request?.[1]?.body))).toEqual({
+        name: "Local test suite",
+        workspace_id: 1,
+        repository_url: null,
+      });
     });
     expect(await screen.findByRole("heading", { name: "Local test suite" })).toBeInTheDocument();
   });
@@ -286,7 +302,7 @@ describe("TestPulse dashboard", () => {
       expires_at: null,
       revoked_at: null,
     };
-    mockFetch((url, init) => {
+    const fetchMock = mockFetch((url, init) => {
       if (url.pathname === "/api/v1/projects/1/ingestion-tokens" && init?.method === "POST") {
         return response({
           id: 6,
@@ -309,6 +325,12 @@ describe("TestPulse dashboard", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create token" }));
 
     expect(await screen.findByText("testpulse-one-time-secret")).toBeInTheDocument();
+    const creationRequest = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        String(input) === "/api/v1/projects/1/ingestion-tokens" && init?.method === "POST",
+    );
+    expect(creationRequest).toBeDefined();
+    expect(JSON.parse(String(creationRequest?.[1]?.body))).toEqual({ name: "Nightly" });
     expect(screen.getByText("Copy your token now")).toBeInTheDocument();
     expect(screen.getByText(/shown once/i)).toBeInTheDocument();
     expect(screen.getByText("testpulse-one-time-secret").closest(".token-list-item")).toBeNull();
@@ -381,7 +403,7 @@ describe("TestPulse dashboard", () => {
 
   it("explains when there are no projects", async () => {
     mockFetch((url) =>
-      url.pathname === "/api/v1/workspaces/1/projects" ? response([]) : response(page()),
+      url.pathname === "/projects" ? response([]) : response(page()),
     );
     renderAt("/");
 
@@ -391,7 +413,7 @@ describe("TestPulse dashboard", () => {
 
   it("sends the selected branch as a history query parameter", async () => {
     const fetchMock = mockFetch((url) => {
-      if (url.pathname === "/api/v1/workspaces/1/projects") {
+      if (url.pathname === "/projects") {
         return response([project]);
       }
       if (url.pathname.endsWith("/runs/7")) {
@@ -432,7 +454,7 @@ describe("TestPulse dashboard", () => {
   it("shows failed test results, messages, and traces as text", async () => {
     const unsafeText = "<img src=x onerror=alert(1)>";
     mockFetch((url) => {
-      if (url.pathname === "/api/v1/workspaces/1/projects") {
+      if (url.pathname === "/projects") {
         return response([project]);
       }
       if (url.pathname.endsWith("/results")) {
@@ -483,7 +505,7 @@ describe("TestPulse dashboard", () => {
 
   it("shows potential instability and observed failure statistics", async () => {
     mockFetch((url) => {
-      if (url.pathname === "/api/v1/workspaces/1/projects") {
+      if (url.pathname === "/projects") {
         return response([project]);
       }
       if (url.pathname.endsWith("/analysis/reliability")) {
@@ -537,7 +559,7 @@ describe("TestPulse dashboard", () => {
 
   it("shows an actionable error when the API fails", async () => {
     mockFetch((url) =>
-      url.pathname === "/api/v1/workspaces/1/projects"
+      url.pathname === "/projects"
         ? response({ detail: "Database unavailable." }, 500)
         : response(page()),
     );
@@ -549,7 +571,7 @@ describe("TestPulse dashboard", () => {
 
   it("paginates results using the API limit and offset", async () => {
     const fetchMock = mockFetch((url) => {
-      if (url.pathname === "/api/v1/workspaces/1/projects") {
+      if (url.pathname === "/projects") {
         return response([project]);
       }
       if (url.pathname.endsWith("/results")) {

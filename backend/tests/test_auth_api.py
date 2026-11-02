@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
 from api.dependencies import get_github_client
 from database import Base, User, UserSession, Workspace, WorkspaceMembership
@@ -136,9 +137,7 @@ def test_github_login_creates_encrypted_revocable_session_and_personal_workspace
             assert user_session is not None
             assert GITHUB_ACCESS_TOKEN not in user_session.github_access_token_ciphertext
             assert (
-                decrypt_token(
-                    user_session.github_access_token_ciphertext, GITHUB_ENCRYPTION_KEY
-                )
+                decrypt_token(user_session.github_access_token_ciphertext, GITHUB_ENCRYPTION_KEY)
                 == GITHUB_ACCESS_TOKEN
             )
 
@@ -158,6 +157,30 @@ def test_github_login_creates_encrypted_revocable_session_and_personal_workspace
 def test_corrupt_encrypted_github_token_raises_value_error() -> None:
     with pytest.raises(ValueError, match="could not be decrypted"):
         decrypt_token("A" * 64, GITHUB_ENCRYPTION_KEY)
+
+
+def test_github_oauth_error_code_is_available_without_exposing_description(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from testpulse.github_app import GitHubAppClient
+
+    def reject_token_exchange(*args: object, **kwargs: object) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "error": "incorrect_client_credentials",
+                "error_description": "sensitive provider response",
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", reject_token_exchange)
+    client = GitHubAppClient("client-id", "client-secret")
+
+    with pytest.raises(GitHubError) as error:
+        client.exchange_code("authorization-code")
+
+    assert error.value.provider_error == "incorrect_client_credentials"
+    assert "sensitive provider response" not in str(error.value)
 
 
 def test_authentication_and_csrf_are_required_for_private_routes(tmp_path: Path) -> None:
@@ -202,9 +225,7 @@ def test_expired_session_is_rejected_and_expired_github_token_refreshes(
             user_session = session.scalar(select(UserSession))
             assert user_session is not None
             assert (
-                decrypt_token(
-                    user_session.github_access_token_ciphertext, GITHUB_ENCRYPTION_KEY
-                )
+                decrypt_token(user_session.github_access_token_ciphertext, GITHUB_ENCRYPTION_KEY)
                 == "refreshed-github-access-token"
             )
             user_session.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)

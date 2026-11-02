@@ -14,6 +14,7 @@ export function isTestOutcome(value: string): value is TestOutcome {
 
 export interface Project {
   id: number;
+  workspace_id: number;
   name: string;
   repository_url: string | null;
   created_at: string;
@@ -119,7 +120,6 @@ export interface GitHubRepository {
   full_name: string;
   html_url: string;
   private: boolean;
-  default_branch: string | null;
 }
 
 export interface GitHubRepositoryPage {
@@ -164,10 +164,12 @@ function nullableString(value: unknown): value is string | null {
 
 function parseProject(value: unknown): Project {
   const project = record(value);
-  const { id, name, repository_url, created_at, updated_at } = project;
+  const { id, workspace_id, name, repository_url, created_at, updated_at } = project;
   if (
     typeof id !== "number" ||
     !Number.isInteger(id) ||
+    typeof workspace_id !== "number" ||
+    !Number.isInteger(workspace_id) ||
     typeof name !== "string" ||
     !nullableString(repository_url) ||
     typeof created_at !== "string" ||
@@ -175,7 +177,15 @@ function parseProject(value: unknown): Project {
   ) {
     throw new Error("TestPulse returned an invalid project.");
   }
-  return { id, name, repository_url, created_at, updated_at };
+  return { id, workspace_id, name, repository_url, created_at, updated_at };
+}
+
+function csrfToken(): string | null {
+  if (typeof document === "undefined") return null;
+  const cookie = document.cookie
+    .split("; ")
+    .find((item) => item.startsWith("testpulse_csrf="));
+  return cookie ? decodeURIComponent(cookie.slice("testpulse_csrf=".length)) : null;
 }
 
 async function requestJson<T>(
@@ -184,8 +194,13 @@ async function requestJson<T>(
   init: RequestInit = {},
 ): Promise<T> {
   let response: Response;
+  const headers = new Headers(init.headers);
+  if (init.method && !["GET", "HEAD", "OPTIONS"].includes(init.method.toUpperCase())) {
+    const token = csrfToken();
+    if (token) headers.set("X-CSRF-Token", token);
+  }
   try {
-    response = await fetch(path, { ...init, credentials: "include", signal });
+    response = await fetch(path, { ...init, headers, credentials: "include", signal });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw error;
@@ -237,17 +252,17 @@ async function requestJson<T>(
 export function getCurrentUser(signal?: AbortSignal): Promise<AuthenticatedUser> {
   return requestJson<unknown>("/api/v1/auth/me", signal).then((value) => {
     const user = record(value);
-    const { id, login, name, avatar_url } = user;
+    const { id, github_login, display_name, avatar_url } = user;
     if (
       typeof id !== "number" ||
       !Number.isInteger(id) ||
-      typeof login !== "string" ||
-      !nullableString(name) ||
+      typeof github_login !== "string" ||
+      !nullableString(display_name) ||
       !nullableString(avatar_url)
     ) {
       throw new Error("TestPulse returned an invalid user session.");
     }
-    return { id, login, name, avatar_url };
+    return { id, login: github_login, name: display_name, avatar_url };
   });
 }
 
@@ -282,9 +297,9 @@ export function getWorkspaceProjects(
   workspaceId: number,
   signal?: AbortSignal,
 ): Promise<Project[]> {
-  return requestJson<unknown>(`/api/v1/workspaces/${workspaceId}/projects`, signal).then((value) => {
+  return requestJson<unknown>("/projects", signal).then((value) => {
     if (!Array.isArray(value)) throw new Error("TestPulse returned an invalid project list.");
-    return value.map(parseProject);
+    return value.map(parseProject).filter((project) => project.workspace_id === workspaceId);
   });
 }
 
@@ -304,7 +319,7 @@ export function getGitHubRepositories(
     const pageData = record(value);
     const pageNumber = pageData.page;
     const perPage = pageData.per_page;
-    const hasMore = pageData.has_more;
+    const hasMore = pageData.has_next;
     if (
       !Array.isArray(pageData.items) ||
       typeof pageNumber !== "number" ||
@@ -317,18 +332,17 @@ export function getGitHubRepositories(
     }
     const items = pageData.items.map((item) => {
       const repository = record(item);
-      const { id, full_name, html_url, private: isPrivate, default_branch } = repository;
+      const { id, full_name, html_url, private: isPrivate } = repository;
       if (
         typeof id !== "number" ||
         !Number.isInteger(id) ||
         typeof full_name !== "string" ||
         typeof html_url !== "string" ||
-        typeof isPrivate !== "boolean" ||
-        !nullableString(default_branch)
+        typeof isPrivate !== "boolean"
       ) {
         throw new Error("TestPulse returned an invalid GitHub repository.");
       }
-      return { id, full_name, html_url, private: isPrivate, default_branch };
+      return { id, full_name, html_url, private: isPrivate };
     });
     return { items, page: pageNumber, per_page: perPage, has_more: hasMore };
   });
@@ -336,13 +350,39 @@ export function getGitHubRepositories(
 
 export function createWorkspaceProject(
   workspaceId: number,
-  input: { name: string; repository_id?: number; repository_url?: string },
+  input: { name: string; repository?: GitHubRepository },
 ): Promise<Project> {
-  return requestJson<unknown>(`/api/v1/workspaces/${workspaceId}/projects`, undefined, {
+  return requestJson<unknown>("/projects", undefined, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }).then(parseProject);
+    body: JSON.stringify({
+      name: input.name,
+      workspace_id: workspaceId,
+      repository_url: input.repository?.html_url ?? null,
+    }),
+  }).then(async (value) => {
+    const project = parseProject(value);
+    if (input.repository) {
+      try {
+        await requestJson(
+          `/api/v1/projects/${project.id}/repository`,
+          undefined,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              github_repository_id: input.repository.id,
+              full_name: input.repository.full_name,
+            }),
+          },
+        );
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown error.";
+        throw new Error(`Project was created, but its GitHub repository could not be connected: ${detail}`);
+      }
+    }
+    return project;
+  });
 }
 
 export function getIngestionTokens(

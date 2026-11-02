@@ -10,8 +10,14 @@ GITHUB_API_VERSION = "2022-11-28"
 
 
 class GitHubError(RuntimeError):
-    def __init__(self, status_code: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        status_code: Optional[int] = None,
+        *,
+        provider_error: Optional[str] = None,
+    ) -> None:
         self.status_code = status_code
+        self.provider_error = provider_error
         super().__init__("GitHub request failed.")
 
 
@@ -42,9 +48,7 @@ class GitHubAppClient:
 
     def refresh_credentials(self, refresh_token: str) -> GitHubCredentials:
         return self._get_credentials(
-            self._oauth_post(
-                {"refresh_token": refresh_token, "grant_type": "refresh_token"}
-            )
+            self._oauth_post({"refresh_token": refresh_token, "grant_type": "refresh_token"})
         )
 
     def get_authenticated_user(self, access_token: str) -> dict[str, Any]:
@@ -97,7 +101,17 @@ class GitHubAppClient:
             raise GitHubError from exc
         data = self._json(response)
         if response.is_error or not isinstance(data, dict) or data.get("error"):
-            raise GitHubError(response.status_code)
+            provider_error = data.get("error") if isinstance(data, dict) else None
+            if (
+                not isinstance(provider_error, str)
+                or not provider_error.isascii()
+                or not provider_error.replace("_", "").replace("-", "").isalnum()
+            ):
+                provider_error = None
+            raise GitHubError(
+                response.status_code,
+                provider_error=provider_error,
+            )
         return data
 
     def _api_get(self, path: str, access_token: str) -> Any:

@@ -10,11 +10,12 @@ from database.schemas.project_ingestion_token_entity import ProjectIngestionToke
 
 
 def create_ingestion_token(
-    session: Session, project_id: int, expires_at: Optional[datetime]
+    session: Session, project_id: int, name: str, expires_at: Optional[datetime]
 ) -> tuple[ProjectIngestionToken, str]:
     raw_token = secrets.token_urlsafe(32)
     record = ProjectIngestionToken(
         project_id=project_id,
+        name=name,
         token_hash=_hash_token(raw_token),
         expires_at=expires_at,
     )

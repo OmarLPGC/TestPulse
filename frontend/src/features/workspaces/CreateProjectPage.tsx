@@ -83,12 +83,7 @@ export function CreateProjectPage() {
     try {
       const created = await createWorkspaceProject(workspaceId, {
         name: projectName.trim() || selectedRepository?.full_name || "",
-        ...(selectedRepository && !createWithoutRepository
-          ? {
-              repository_id: selectedRepository.id,
-              repository_url: selectedRepository.html_url,
-            }
-          : {}),
+        ...(selectedRepository && !createWithoutRepository ? { repository: selectedRepository } : {}),
       });
       refreshProjects();
       navigate(`/project/${created.id}`);

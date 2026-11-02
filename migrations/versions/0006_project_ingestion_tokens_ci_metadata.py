@@ -1,13 +1,13 @@
 """Add project-scoped ingestion tokens and CI metadata.
 
-Revision ID: 0006_project_ingestion_tokens_ci_metadata
+Revision ID: 0006_ci_ingestion_tokens
 Revises: 0005_users_workspaces_and_github
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0006_project_ingestion_tokens_ci_metadata"
+revision = "0006_ci_ingestion_tokens"
 down_revision = "0005_users_workspaces_and_github"
 branch_labels = None
 depends_on = None

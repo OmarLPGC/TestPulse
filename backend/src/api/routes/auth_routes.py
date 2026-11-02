@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -28,6 +29,7 @@ from api.schemas.auth_schemas import AuthenticatedUserRead
 
 router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 OAUTH_STATE_TTL_SECONDS = 600
+logger = logging.getLogger(__name__)
 
 
 @router.get("/github/login")
@@ -42,9 +44,7 @@ def github_login(
             detail="GitHub App callback URL is not configured.",
         )
     now = datetime.now(timezone.utc)
-    session.query(OAuthState).filter(OAuthState.expires_at <= now).delete(
-        synchronize_session=False
-    )
+    session.query(OAuthState).filter(OAuthState.expires_at <= now).delete(synchronize_session=False)
     raw_state = secrets.token_urlsafe(32)
     session.add(
         OAuthState(
@@ -114,8 +114,24 @@ def github_callback(
 
     try:
         credentials = github.exchange_code(code)
+    except GitHubError as exception:
+        logger.warning(
+            "GitHub OAuth code exchange failed (upstream_status=%s, provider_error=%s).",
+            exception.status_code,
+            exception.provider_error,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="GitHub authorization could not be completed.",
+        ) from exception
+
+    try:
         profile = github.get_authenticated_user(credentials.access_token)
     except GitHubError as exception:
+        logger.warning(
+            "GitHub authenticated-user lookup failed (upstream_status=%s).",
+            exception.status_code,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="GitHub authorization could not be completed.",
@@ -138,9 +154,7 @@ def github_callback(
                 else None
             ),
             github_token_expires_at=(
-                now + timedelta(seconds=credentials.expires_in)
-                if credentials.expires_in
-                else None
+                now + timedelta(seconds=credentials.expires_in) if credentials.expires_in else None
             ),
             expires_at=now + timedelta(seconds=settings.session_ttl_seconds),
         )

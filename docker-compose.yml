@@ -60,6 +60,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      disable: true
 
   frontend:
     profiles: ["self-hosted"]
