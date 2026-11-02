@@ -28,6 +28,7 @@ from database import (
     TestRun as RunEntity,
 )
 from database.db_operations.analysis_jobs import claim_next_analysis_job
+from database.db_operations.ingestion_tokens import create_ingestion_token
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.engine import make_url
@@ -216,10 +217,9 @@ def test_project_api_persists_across_app_connection_restart(postgres_engine) -> 
         workspace = Workspace(name=f"API-{uuid4().hex}", is_personal=True)
         session.add_all((user, workspace))
         session.flush()
-        session.add(
-            WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role="owner")
-        )
+        session.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role="owner"))
         session.commit()
+        session.refresh(user)
         session.expunge(user)
     app = create_app(settings, database_engine=postgres_engine)
     app.dependency_overrides[get_current_user] = lambda: user
@@ -359,6 +359,10 @@ def test_failed_result_persistence_rolls_back_entire_run(postgres_engine) -> Non
         project = create_project(session, "AtomicIngestion")
         session.commit()
         project_id = project.id
+        _, ingestion_token = create_ingestion_token(
+            session, project_id, "Atomic ingestion test", expires_at=None
+        )
+        session.commit()
 
     def fail_when_results_are_flushed(
         session: Session, flush_context: object, instances: object
@@ -379,7 +383,10 @@ def test_failed_result_persistence_rolls_back_entire_run(postgres_engine) -> Non
                     '<testcase classname="atomic.Case" name="two"/>'
                     "</testsuite>"
                 ),
-                headers={"Content-Type": "application/xml"},
+                headers={
+                    "Content-Type": "application/xml",
+                    "Authorization": f"Bearer {ingestion_token}",
+                },
             )
     finally:
         event.remove(Session, "before_flush", fail_when_results_are_flushed)
