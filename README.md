@@ -176,6 +176,36 @@ configuración de CI con tokens de ingesta que se muestran una sola vez. La vist
 permite explorar ejecuciones, filtrar por rama, inspeccionar resultados, consultar fiabilidad y
 revisar regresiones.
 
+### Capturas del dashboard
+
+Listado de proyectos:
+
+![Dashboard de proyectos](docs/images/projects-overview.png)
+
+Selección de un repositorio de GitHub al crear un proyecto:
+
+![Selección de repositorio de GitHub](docs/images/github-repository-selection.png)
+
+Historial de ejecuciones y ramas:
+
+![Historial de ejecuciones](docs/images/run-history.png)
+
+Detalle de una ejecución con una regresión detectada:
+
+![Detalle de ejecución y regresión](docs/images/run-details-regression.png)
+
+Análisis de fiabilidad e identificación de tests potencialmente inestables:
+
+![Análisis de fiabilidad](docs/images/reliability-analysis.png)
+
+Resumen de la ejecución de los tests y sus resultados:
+
+![Resumen de resultados de tests](docs/images/run-results-summary.png)
+
+Informe JUnit generado y enviado desde GitHub Actions:
+
+![Ejecución de CI enviada a TestPulse](docs/images/ci-test-upload.png)
+
 Con la API y PostgreSQL iniciados, abre otra terminal desde la raíz del repositorio:
 
 ```powershell
@@ -457,6 +487,36 @@ The reliability and regression endpoints remain available and calculate their re
 The dashboard includes GitHub sign-in, a workspace selector, repository connection, and CI setup
 with ingestion tokens that are shown only once. Project views let users browse runs, filter by
 branch, inspect results, and review reliability and regressions.
+
+### Dashboard Screenshots
+
+Projects:
+
+![Projects Dashboard](docs/images/projects-overview.png)
+
+Github repository selection on project creation:
+
+![Github repository selection](docs/images/github-repository-selection.png)
+
+History and branches:
+
+![Execution history](docs/images/run-history.png)
+
+Executions details and detected regressions:
+
+![Executions details and detected regressions](docs/images/run-details-regression.png)
+
+Reliability analisis and falky tests detection:
+
+![Reliability analisis](docs/images/reliability-analysis.png)
+
+Test execution summary and results:
+
+![Test execution summary](docs/images/run-results-summary.png)
+
+JUnit report:
+
+![JUnit report](docs/images/ci-test-upload.png)
 
 With the API and PostgreSQL running, open a separate terminal from the repository root:
 
