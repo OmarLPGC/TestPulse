@@ -176,6 +176,8 @@ configuración de CI con tokens de ingesta que se muestran una sola vez. La vist
 permite explorar ejecuciones, filtrar por rama, inspeccionar resultados, consultar fiabilidad y
 revisar regresiones.
 
+** Cargar un proyecto ya creado desde github no obtendrá las ramas y tests realizados previos a su creación en la base de datos de testpulse.
+
 ### Capturas del dashboard
 
 Listado de proyectos:
@@ -487,6 +489,8 @@ The reliability and regression endpoints remain available and calculate their re
 The dashboard includes GitHub sign-in, a workspace selector, repository connection, and CI setup
 with ingestion tokens that are shown only once. Project views let users browse runs, filter by
 branch, inspect results, and review reliability and regressions.
+
+** A project loaded from github won't have the branches neither the tests ran on that project before its creation on testpulse database.
 
 ### Dashboard Screenshots
 
