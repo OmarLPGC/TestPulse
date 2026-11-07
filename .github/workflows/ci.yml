@@ -4,10 +4,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   quality:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:16
@@ -36,7 +39,32 @@ jobs:
       - run: testpulse --help
       - run: testpulse-worker --help
       - run: python -m alembic upgrade head
-      - run: python -m pytest
+      - run: python -m pytest --junitxml=test-results.xml
+      - name: Upload test results to TestPulse
+        if: >-
+          always() &&
+          (github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository)
+        env:
+          TESTPULSE_URL: ${{ vars.TESTPULSE_URL }}
+          TESTPULSE_PROJECT_ID: ${{ vars.TESTPULSE_PROJECT_ID }}
+          TESTPULSE_API_TOKEN: ${{ secrets.TESTPULSE_API_TOKEN }}
+          TESTPULSE_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if [ ! -f test-results.xml ]; then
+            echo "::notice::Skipping TestPulse upload because no JUnit report was generated."
+            exit 0
+          fi
+          if [ -z "$TESTPULSE_URL" ] || [ -z "$TESTPULSE_PROJECT_ID" ] || [ -z "$TESTPULSE_API_TOKEN" ]; then
+            echo "::notice::Skipping TestPulse upload; configure TESTPULSE_URL and TESTPULSE_PROJECT_ID repository variables and the TESTPULSE_API_TOKEN secret."
+            exit 0
+          fi
+          testpulse \
+            --url "$TESTPULSE_URL" \
+            --project "$TESTPULSE_PROJECT_ID" \
+            --report test-results.xml \
+            --commit "$GITHUB_SHA" \
+            --branch "$TESTPULSE_BRANCH"
       - run: python -m ruff check .
       - run: python -m ruff format --check .
       - uses: actions/setup-node@v4
