@@ -510,9 +510,9 @@ Executions details and detected regressions:
 
 ![Executions details and detected regressions](docs/images/run-details-regression.png)
 
-Reliability analisis and falky tests detection:
+Reliability analysis and falky tests detection:
 
-![Reliability analisis](docs/images/reliability-analysis.png)
+![Reliability analysis](docs/images/reliability-analysis.png)
 
 Test execution summary and results:
 
